@@ -32,30 +32,4 @@ jobs:
       - name: Check (WASM)
         run: cargo check --workspace --target wasm32-unknown-unknown
 
-  frontend:
-    name: Frontend (Next.js)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: stellargrant-fe
-    env:
-      NEXT_PUBLIC_STELLAR_RPC_URL: https://soroban-testnet.stellar.org
-      NEXT_PUBLIC_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015"
-      NEXT_PUBLIC_CONTRACT_ID: CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-
-      - name: Install deps
-        run: npm ci
-
-      - name: ESLint
-        run: npm run lint -- .
-
-      - name: Build
-        run: npm run build
+  

@@ -72,6 +72,9 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           file: stellargrant-contracts/cobertura.xml
-          fail_ci_if_error: true
+          # fail_ci_if_error is false to allow fork PRs to pass CI.
+          # GitHub does not expose secrets to fork workflows (security policy).
+          # Coverage will upload successfully on pushes to main from the base repo.
+          fail_ci_if_error: false
           flags: unittests
           token: ${{ secrets.CODECOV_TOKEN }}

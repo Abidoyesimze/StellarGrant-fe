@@ -1273,7 +1273,8 @@ mod tests {
 
         // Total weight = 3 + 1 = 4. Quorum margin = (4 / 2) + 1 = 3.
         // high_rep_reviewer's vote (3 weight) should pass it alone.
-        let result = client.milestone_vote(&grant_id, &milestone_idx, &high_rep_reviewer, &true, &None);
+        let result =
+            client.milestone_vote(&grant_id, &milestone_idx, &high_rep_reviewer, &true, &None);
         assert_eq!(result, true);
 
         env.as_contract(&contract_id, || {
@@ -1361,7 +1362,8 @@ mod tests {
 
         // Total weight = 3 + 1 = 4. Quorum margin = (4 / 2) + 1 = 3.
         // low_rep_reviewer's vote (1 weight) should not reach quorum alone.
-        let result = client.milestone_vote(&grant_id, &milestone_idx, &low_rep_reviewer, &true, &None);
+        let result =
+            client.milestone_vote(&grant_id, &milestone_idx, &low_rep_reviewer, &true, &None);
         assert_eq!(result, false);
 
         env.as_contract(&contract_id, || {
@@ -1408,9 +1410,21 @@ mod tests {
 
         // Total weight = 3. Quorum = 2.
         // Dissenting votes false first.
-        client.milestone_vote(&grant_id, &milestone_idx, &reviewer_dissenting, &false, &None);
+        client.milestone_vote(
+            &grant_id,
+            &milestone_idx,
+            &reviewer_dissenting,
+            &false,
+            &None,
+        );
         // Harmonious votes true, reaching quorum 2.
-        let result = client.milestone_vote(&grant_id, &milestone_idx, &reviewer_harmonious, &true, &None);
+        let result = client.milestone_vote(
+            &grant_id,
+            &milestone_idx,
+            &reviewer_harmonious,
+            &true,
+            &None,
+        );
         assert_eq!(result, true);
 
         env.as_contract(&contract_id, || {

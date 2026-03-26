@@ -1,8 +1,4 @@
-# Coverage artifacts
-tarpaulin-report/
-tarpaulin-report.xml
-tarpaulin-report.json
-cobertura.xml
-coverage/
-*.profraw
-*.profdata
+
+/api/node_modules
+/api/dist
+/api/.env*

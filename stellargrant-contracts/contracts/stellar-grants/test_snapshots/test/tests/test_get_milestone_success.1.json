@@ -211,6 +211,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "deadline"
+                    },
+                    "val": {
+                      "u64": "0"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "description"
                     },
                     "val": {

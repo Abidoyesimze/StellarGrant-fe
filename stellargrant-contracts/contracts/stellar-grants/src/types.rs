@@ -84,6 +84,7 @@ pub struct Milestone {
     pub status_updated_at: u64,
     pub proof_url: Option<String>,
     pub submission_timestamp: u64,
+    pub deadline: u64,
 }
 
 #[contracttype]

@@ -130,8 +130,15 @@ impl StellarGrantsContract {
         milestone_amount: i128,
         num_milestones: u32,
         reviewers: soroban_sdk::Vec<Address>,
+        milestone_deadlines: Option<soroban_sdk::Vec<u64>>,
     ) -> Result<u64, ContractError> {
         owner.require_auth();
+
+        if let Some(ref deadlines) = milestone_deadlines {
+            if deadlines.len() != num_milestones {
+                return Err(ContractError::InvalidInput);
+            }
+        }
 
         if total_amount <= 0 || milestone_amount <= 0 {
             return Err(ContractError::InvalidInput);
@@ -183,6 +190,30 @@ impl StellarGrantsContract {
         );
         Storage::set_multisig_signers(&env, grant_id, &soroban_sdk::Vec::new(&env));
 
+        for i in 0..num_milestones {
+            let deadline = if let Some(ref deadlines) = milestone_deadlines {
+                deadlines.get(i).unwrap_or(0)
+            } else {
+                0
+            };
+
+            let milestone = Milestone {
+                idx: i,
+                description: String::from_str(&env, ""),
+                amount: milestone_amount,
+                state: MilestoneState::Pending,
+                votes: soroban_sdk::Map::new(&env),
+                approvals: 0,
+                rejections: 0,
+                reasons: soroban_sdk::Map::new(&env),
+                status_updated_at: 0,
+                proof_url: None,
+                submission_timestamp: 0,
+                deadline,
+            };
+            Storage::set_milestone(&env, grant_id, i, &milestone);
+        }
+
         Events::emit_grant_created(&env, grant_id, owner, title, total_amount);
 
         Ok(grant_id)
@@ -211,6 +242,7 @@ impl StellarGrantsContract {
             milestone_amount,
             num_milestones,
             reviewers,
+            None,
         )?;
         Storage::set_grant_min_reputation(&env, grant_id, min_reputation_score);
         Ok(grant_id)
@@ -261,6 +293,7 @@ impl StellarGrantsContract {
             milestone_amount,
             num_milestones,
             reviewers,
+            None,
         )?;
 
         Storage::set_escrow_state(
@@ -1267,28 +1300,25 @@ fn apply_milestone_submission(
         return Err(ContractError::InvalidInput);
     }
 
-    if let Some(existing) = Storage::get_milestone(env, grant_id, milestone_idx) {
-        if existing.state == MilestoneState::Submitted
-            || existing.state == MilestoneState::Approved
-            || existing.state == MilestoneState::Paid
-        {
-            return Err(ContractError::MilestoneAlreadySubmitted);
-        }
+    let mut milestone = Storage::get_milestone(env, grant_id, milestone_idx)
+        .ok_or(ContractError::MilestoneNotFound)?;
+
+    if milestone.state == MilestoneState::Submitted
+        || milestone.state == MilestoneState::Approved
+        || milestone.state == MilestoneState::Paid
+    {
+        return Err(ContractError::MilestoneAlreadySubmitted);
     }
 
-    let milestone = Milestone {
-        idx: milestone_idx,
-        description: description.clone(),
-        amount: 0,
-        state: MilestoneState::Submitted,
-        votes: soroban_sdk::Map::new(env),
-        approvals: 0,
-        rejections: 0,
-        reasons: soroban_sdk::Map::new(env),
-        status_updated_at: 0,
-        proof_url: Some(proof_url),
-        submission_timestamp: env.ledger().timestamp(),
-    };
+    if milestone.deadline > 0 && env.ledger().timestamp() > milestone.deadline {
+        Events::emit_milestone_expired(env, grant_id, milestone_idx);
+        return Err(ContractError::DeadlinePassed);
+    }
+
+    milestone.description = description.clone();
+    milestone.state = MilestoneState::Submitted;
+    milestone.proof_url = Some(proof_url);
+    milestone.submission_timestamp = env.ledger().timestamp();
 
     Storage::set_milestone(env, grant_id, milestone_idx, &milestone);
     Events::emit_milestone_submitted(env, grant_id, milestone_idx, description);

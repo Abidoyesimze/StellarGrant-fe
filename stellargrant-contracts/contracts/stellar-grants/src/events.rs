@@ -351,4 +351,21 @@ impl Events {
         };
         event.publish(env);
     }
+
+    pub fn emit_milestone_expired(env: &Env, grant_id: u64, milestone_idx: u32) {
+        let event = MilestoneExpired {
+            grant_id,
+            milestone_idx,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MilestoneExpired {
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub timestamp: u64,
 }

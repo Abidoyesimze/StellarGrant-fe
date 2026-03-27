@@ -1065,6 +1065,108 @@ impl StellarGrantsContract {
         })
     }
 
+    /// Add a new reviewer to an active grant. Only callable by the grant owner.
+    ///
+    /// # Arguments
+    /// * `grant_id` - The grant to update.
+    /// * `owner` - The grant owner (must authenticate).
+    /// * `new_reviewer` - Address of the reviewer to add.
+    ///
+    /// # Errors
+    /// * [`ContractError::GrantNotFound`] – grant does not exist.
+    /// * [`ContractError::Unauthorized`] – caller is not the grant owner.
+    /// * [`ContractError::InvalidState`] – grant is not active.
+    /// * [`ContractError::InvalidInput`] – reviewer is already in the list.
+    pub fn grant_add_reviewer(
+        env: Env,
+        grant_id: u64,
+        owner: Address,
+        new_reviewer: Address,
+    ) -> Result<(), ContractError> {
+        owner.require_auth();
+
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+
+        if grant.owner != owner {
+            return Err(ContractError::Unauthorized);
+        }
+        if grant.status != GrantStatus::Active {
+            return Err(ContractError::InvalidState);
+        }
+        if grant.reviewers.contains(new_reviewer.clone()) {
+            return Err(ContractError::InvalidInput);
+        }
+
+        grant.reviewers.push_back(new_reviewer.clone());
+        Storage::set_grant(&env, grant_id, &grant);
+
+        Events::emit_reviewer_added(&env, grant_id, owner, new_reviewer);
+        Ok(())
+    }
+
+    /// Remove an existing reviewer from an active grant. Only callable by the grant owner.
+    /// Ensures at least one reviewer remains after removal.
+    /// Past quorum decisions on milestones are NOT retroactively changed.
+    ///
+    /// # Arguments
+    /// * `grant_id` - The grant to update.
+    /// * `owner` - The grant owner (must authenticate).
+    /// * `old_reviewer` - Address of the reviewer to remove.
+    ///
+    /// # Errors
+    /// * [`ContractError::GrantNotFound`] – grant does not exist.
+    /// * [`ContractError::Unauthorized`] – caller is not the grant owner, or reviewer not found.
+    /// * [`ContractError::InvalidState`] – grant is not active.
+    /// * [`ContractError::InvalidInput`] – removing would leave zero reviewers, or quorum would exceed reviewer count.
+    pub fn grant_remove_reviewer(
+        env: Env,
+        grant_id: u64,
+        owner: Address,
+        old_reviewer: Address,
+    ) -> Result<(), ContractError> {
+        owner.require_auth();
+
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+
+        if grant.owner != owner {
+            return Err(ContractError::Unauthorized);
+        }
+        if grant.status != GrantStatus::Active {
+            return Err(ContractError::InvalidState);
+        }
+
+        // Must have more than 1 reviewer to allow removal
+        if grant.reviewers.len() <= 1 {
+            return Err(ContractError::InvalidInput);
+        }
+
+        // Find and remove the reviewer
+        let mut new_reviewers = soroban_sdk::Vec::new(&env);
+        let mut found = false;
+        for r in grant.reviewers.iter() {
+            if r == old_reviewer {
+                found = true;
+            } else {
+                new_reviewers.push_back(r);
+            }
+        }
+
+        if !found {
+            return Err(ContractError::Unauthorized);
+        }
+
+        // Ensure quorum does not exceed the new reviewer count
+        if grant.quorum > new_reviewers.len() {
+            return Err(ContractError::InvalidInput);
+        }
+
+        grant.reviewers = new_reviewers;
+        Storage::set_grant(&env, grant_id, &grant);
+
+        Events::emit_reviewer_removed(&env, grant_id, owner, old_reviewer);
+        Ok(())
+    }
+
     /// Retrieve a grant by its ID
     pub fn get_grant(env: Env, grant_id: u64) -> Result<Grant, ContractError> {
         Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)

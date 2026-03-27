@@ -450,6 +450,28 @@ impl Events {
         };
         event.publish(env);
     }
+
+    pub fn emit_reviewer_added(env: &Env, grant_id: u64, owner: Address, new_reviewer: Address) {
+        let event = ReviewerAdded {
+            event_version: EVENT_VERSION,
+            grant_id,
+            owner,
+            new_reviewer,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_reviewer_removed(env: &Env, grant_id: u64, owner: Address, old_reviewer: Address) {
+        let event = ReviewerRemoved {
+            event_version: EVENT_VERSION,
+            grant_id,
+            owner,
+            old_reviewer,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
 }
 
 #[contractevent]
@@ -458,5 +480,25 @@ pub struct MilestoneExpired {
     pub event_version: u32,
     pub grant_id: u64,
     pub milestone_idx: u32,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewerAdded {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub owner: Address,
+    pub new_reviewer: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewerRemoved {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub owner: Address,
+    pub old_reviewer: Address,
     pub timestamp: u64,
 }

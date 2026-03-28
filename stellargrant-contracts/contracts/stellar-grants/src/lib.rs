@@ -1,10 +1,10 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 
-    /// View: Get milestone by grant_id and milestone_idx
-    pub fn get_milestone(env: Env, grant_id: u64, milestone_idx: u32) -> Option<Milestone> {
-        Storage::get_milestone(&env, grant_id, milestone_idx)
-    }
+/// View: Get milestone by grant_id and milestone_idx
+pub fn get_milestone(env: Env, grant_id: u64, milestone_idx: u32) -> Option<Milestone> {
+    Storage::get_milestone(&env, grant_id, milestone_idx)
+}
 mod events;
 /// Token-transfer reentrancy guard (lock/unlock on transient storage). See `reentrancy` module.
 mod reentrancy;
@@ -745,7 +745,6 @@ impl StellarGrantsContract {
         } else {
             milestone.rejections += reputation;
         }
-
 
         let quorum_reached = milestone.approvals >= grant.quorum;
         if quorum_reached {

@@ -1,6 +1,5 @@
 use soroban_sdk::{testutils::Address as TestAddress, Address, Env, String, Vec};
-use stellar_grants::{StellarGrantsContractClient, Storage, MilestoneState};
-
+use stellar_grants::{MilestoneState, StellarGrantsContractClient, Storage};
 
 #[test]
 
@@ -41,15 +40,11 @@ fn test_milestone_voting_quorum_and_events() {
     );
 
     // Reviewer 1 votes approve
-    let res1 = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(0).unwrap(), &true, &None
-    );
+    let res1 = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
     assert_eq!(res1, false); // Quorum not reached yet
 
     // Reviewer 2 votes approve (should reach quorum)
-    let res2 = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(1).unwrap(), &true, &None
-    );
+    let res2 = client.milestone_vote(&grant_id, &0, &reviewers.get(1).unwrap(), &true, &None);
     assert_eq!(res2, true); // Quorum reached
 
     // Check milestone state is Approved using contract view method
@@ -93,16 +88,10 @@ fn test_milestone_vote_after_quorum_panics() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
-    let _ = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(0).unwrap(), &true, &None
-    );
-    let _ = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(1).unwrap(), &true, &None
-    );
+    let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
+    let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(1).unwrap(), &true, &None);
     // This vote should panic
-    let _ = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(2).unwrap(), &true, &None
-    );
+    let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(2).unwrap(), &true, &None);
 }
 #[test]
 #[should_panic(expected = "HostError: Error(Auth, InvalidAction)")]
@@ -144,13 +133,8 @@ fn test_milestone_double_voting_panics() {
     );
 
     // Reviewer 1 votes approve
-    let _ = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(0).unwrap(), &true, &None
-    );
+    let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
 
     // Reviewer 1 tries to vote again (should panic)
-    let _ = client.milestone_vote(
-        &grant_id, &0, &reviewers.get(0).unwrap(), &true, &None
-    );
+    let _ = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
 }
-

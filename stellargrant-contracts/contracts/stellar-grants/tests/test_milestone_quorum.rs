@@ -37,6 +37,8 @@ fn test_milestone_voting_quorum_and_events() {
         &quorum,
         &None,
         &0i128,
+        &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
 
     client.grant_accept(&grant_id, &owner);
@@ -61,8 +63,15 @@ fn test_milestone_voting_quorum_and_events() {
     assert_eq!(res2, true);
 
     let milestone = client.get_milestone(&grant_id, &0);
-    // Paid after quorum
-    assert_eq!(milestone.state, MilestoneState::Paid);
+    // Awaiting payout after quorum
+    assert_eq!(milestone.state, MilestoneState::AwaitingPayout);
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + stellar_grants::CHALLENGE_PERIOD + 1);
+    client.milestone_payout(&grant_id, &0, &owner);
+
+    let paid_milestone = client.get_milestone(&grant_id, &0);
+    assert_eq!(paid_milestone.state, MilestoneState::Paid);
 }
 
 #[test]
@@ -101,6 +110,8 @@ fn test_milestone_vote_after_quorum_panics() {
         &quorum,
         &None,
         &0i128,
+        &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     client.grant_accept(&grant_id, &owner);
     let _ = client.milestone_submit(
@@ -149,6 +160,8 @@ fn test_milestone_double_voting_panics() {
         &quorum,
         &None,
         &0i128,
+        &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
 
     client.grant_accept(&grant_id, &owner);

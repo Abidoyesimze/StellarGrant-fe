@@ -1,5 +1,5 @@
 use crate::types::MilestoneState;
-use soroban_sdk::{contractevent, Address, BytesN, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String, Vec};
 
 const EVENT_VERSION: u32 = 1;
 const GLOBAL_EVENT_GRANT_ID: u64 = 0;
@@ -23,6 +23,17 @@ pub struct MilestoneRejected {
     pub grant_id: u64,
     pub milestone_idx: u32,
     pub reviewer: Address,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MilestoneChallenged {
+    pub event_version: u32,
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub funder: Address,
     pub reason: String,
     pub timestamp: u64,
 }
@@ -174,6 +185,7 @@ pub struct GrantCreated {
     pub owner: Address,
     pub title: String,
     pub total_amount: i128,
+    pub tags: Vec<String>,
     pub timestamp: u64,
 }
 
@@ -403,6 +415,7 @@ impl Events {
         owner: Address,
         title: String,
         total_amount: i128,
+        tags: Vec<String>,
     ) {
         let event = GrantCreated {
             event_version: EVENT_VERSION,
@@ -410,6 +423,7 @@ impl Events {
             owner,
             title,
             total_amount,
+            tags,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
@@ -499,6 +513,24 @@ impl Events {
             grant_id,
             milestone_idx,
             reviewer,
+            reason,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn milestone_challenged(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        funder: Address,
+        reason: String,
+    ) {
+        let event = MilestoneChallenged {
+            event_version: EVENT_VERSION,
+            grant_id,
+            milestone_idx,
+            funder,
             reason,
             timestamp: env.ledger().timestamp(),
         };

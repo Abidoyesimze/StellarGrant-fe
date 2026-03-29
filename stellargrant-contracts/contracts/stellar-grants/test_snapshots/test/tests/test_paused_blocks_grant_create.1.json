@@ -110,6 +110,12 @@
                 "void",
                 {
                   "i128": "0"
+                },
+                {
+                  "i128": "0"
+                },
+                {
+                  "vec": []
                 }
               ]
             }
@@ -289,6 +295,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "hard_cap"
+                    },
+                    "val": {
+                      "i128": "0"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "id"
                     },
                     "val": {
@@ -375,6 +389,14 @@
                     },
                     "val": {
                       "u32": 8
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "tags"
+                    },
+                    "val": {
+                      "vec": []
                     }
                   },
                   {
@@ -1017,6 +1039,14 @@
                   },
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "tags"
+                  },
+                  "val": {
+                    "vec": []
                   }
                 },
                 {

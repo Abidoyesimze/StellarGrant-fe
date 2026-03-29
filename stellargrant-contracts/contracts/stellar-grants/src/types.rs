@@ -43,6 +43,12 @@ pub enum ContractError {
     InsufficientBalance = 32,
     /// Contract is globally paused; all state-modifying operations are blocked.
     ContractPaused = 33,
+    /// Donation would exceed the grant's hard cap.
+    CapReached = 34,
+    /// Grant has more than 5 tags.
+    TooManyTags = 35,
+    /// A tag exceeds 20 characters.
+    TagTooLong = 36,
 }
 
 #[contracttype]
@@ -134,6 +140,10 @@ pub enum MilestoneState {
     Resolved = 6,
     /// Open for community upvotes / comments before reviewer voting begins.
     CommunityReview = 7,
+    /// Quorum reached, but payment is delayed by a challenge period.
+    AwaitingPayout = 8,
+    /// An AwaitingPayout milestone was challenged by a funder.
+    Challenged = 9,
 }
 
 #[contracttype]

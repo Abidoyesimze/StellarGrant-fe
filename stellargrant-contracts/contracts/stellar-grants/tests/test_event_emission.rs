@@ -32,10 +32,12 @@ fn test_event_emission_on_grant_create_and_fund() {
         &quorum,
         &None,
         &0i128,
+        &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     let funder = <Address as TestAddress>::generate(&env);
-    token_admin.mint(&funder, &100);
     client.grant_accept(&grant_id, &owner);
+    token_admin.mint(&funder, &100);
     client.grant_fund(&grant_id, &funder, &100, &token, &None);
     let events = env.events().all();
     // Debug print all events
@@ -82,10 +84,12 @@ fn test_event_emission_on_milestone_vote() {
         &quorum,
         &None,
         &0i128,
+        &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     let funder = <Address as TestAddress>::generate(&env);
-    token_admin.mint(&funder, &100);
     client.grant_accept(&grant_id, &owner);
+    token_admin.mint(&funder, &100);
     client.grant_fund(&grant_id, &funder, &100, &token, &None);
     client.milestone_submit(
         &grant_id,

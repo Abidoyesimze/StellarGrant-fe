@@ -87,7 +87,10 @@ impl StellarGrantsContract {
         }
 
         let amount = milestone.amount;
-        if grant.escrow_balance < amount {
+        let payout_token = milestone.payout_token.clone();
+        let current_balance = grant.escrow_balances.get(payout_token.clone()).unwrap_or(0);
+
+        if current_balance < amount {
             return Err(ContractError::InsufficientBalance);
         }
 
@@ -98,21 +101,28 @@ impl StellarGrantsContract {
         let recipient = grant.owner.clone();
 
         // Payout Execution & balance deduction
-        grant.escrow_balance = grant
-            .escrow_balance
+        let new_balance = current_balance
             .checked_sub(amount)
             .ok_or(ContractError::InsufficientBalance)?;
+        grant.escrow_balances.set(payout_token.clone(), new_balance);
         grant.milestones_paid_out += 1;
 
         Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
         Storage::set_grant(&env, grant_id, &grant);
 
-        let token_client = token::Client::new(&env, &grant.token);
+        let token_client = token::Client::new(&env, &payout_token);
         token_client.transfer(&env.current_contract_address(), &recipient, &amount);
 
         // Events
-        Events::emit_milestone_approved(&env, grant_id, milestone_idx, amount, recipient.clone());
-        Events::emit_payout_executed(&env, grant_id, recipient, amount);
+        Events::emit_milestone_approved(
+            &env,
+            grant_id,
+            milestone_idx,
+            amount,
+            payout_token.clone(),
+            recipient.clone(),
+        );
+        Events::emit_payout_executed(&env, grant_id, recipient, amount, payout_token);
 
         Ok(())
     }
@@ -143,65 +153,90 @@ impl StellarGrantsContract {
 
         // Fetch grant for payout/refund
         let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        let token_client = token::Client::new(&env, &grant.token);
+        let payout_token = milestone.payout_token.clone();
+        let token_client = token::Client::new(&env, &payout_token);
+
         if approve {
             // Approve: payout milestone amount to grant owner (contributor)
-            if grant.escrow_balance < grant.milestone_amount {
+            let current_balance = grant.escrow_balances.get(payout_token.clone()).unwrap_or(0);
+            if current_balance < milestone.amount {
                 return Err(ContractError::InvalidInput);
             }
             token_client.transfer(
                 &env.current_contract_address(),
                 &grant.owner,
-                &grant.milestone_amount,
+                &milestone.amount,
             );
-            grant.escrow_balance -= grant.milestone_amount;
+
+            grant
+                .escrow_balances
+                .set(payout_token.clone(), current_balance - milestone.amount);
             grant.milestones_paid_out += 1;
             Storage::set_grant(&env, grant_id, &grant);
-            Events::emit_milestone_paid(&env, grant_id, milestone_idx, grant.milestone_amount);
+            Events::emit_milestone_paid(
+                &env,
+                grant_id,
+                milestone_idx,
+                milestone.amount,
+                payout_token,
+            );
         // Enhanced event emission: include all relevant data, standardize topics
         } else {
             // Reject: refund milestone amount to funders (pro-rata)
-            let total_refundable = grant.milestone_amount;
-            let mut total_contributions: i128 = 0;
-            for fund_entry in grant.funders.iter() {
-                total_contributions += fund_entry.amount;
-            }
-            if total_contributions <= 0 {
+            let total_refundable = milestone.amount;
+            let current_balance = grant.escrow_balances.get(payout_token.clone()).unwrap_or(0);
+            if current_balance < total_refundable {
                 return Err(ContractError::InvalidInput);
             }
-            let funders_len = grant.funders.len();
-            let mut distributed = 0i128;
-            for i in 0..funders_len {
-                let fund_entry = grant.funders.get(i).unwrap();
-                let is_last = i + 1 == funders_len;
-                let refund_amount = if is_last {
-                    total_refundable - distributed
-                } else {
-                    let amount = fund_entry
-                        .amount
-                        .checked_mul(total_refundable)
-                        .ok_or(ContractError::InvalidInput)?
-                        .checked_div(total_contributions)
-                        .ok_or(ContractError::InvalidInput)?;
-                    distributed += amount;
-                    amount
-                };
-                if refund_amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &fund_entry.funder,
-                        &refund_amount,
-                    );
-                    Events::emit_refund_issued(
-                        // Enhanced event emission: include all relevant data, standardize topics
-                        &env,
-                        grant_id,
-                        fund_entry.funder.clone(),
-                        refund_amount,
-                    );
+
+            let mut total_token_contributions: i128 = 0;
+            let mut token_funders = soroban_sdk::Vec::new(&env);
+            for fund_entry in grant.funders.iter() {
+                if fund_entry.token == payout_token {
+                    total_token_contributions += fund_entry.amount;
+                    token_funders.push_back(fund_entry);
                 }
             }
-            grant.escrow_balance -= total_refundable;
+
+            if total_token_contributions > 0 {
+                let token_funders_len = token_funders.len();
+                let mut distributed = 0i128;
+
+                for i in 0..token_funders_len {
+                    let fund_entry = token_funders.get(i).unwrap();
+                    let is_last = i + 1 == token_funders_len;
+                    let refund_amount = if is_last {
+                        total_refundable - distributed
+                    } else {
+                        let amount = fund_entry
+                            .amount
+                            .checked_mul(total_refundable)
+                            .ok_or(ContractError::InvalidInput)?
+                            .checked_div(total_token_contributions)
+                            .ok_or(ContractError::InvalidInput)?;
+                        distributed += amount;
+                        amount
+                    };
+
+                    if refund_amount > 0 {
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &fund_entry.funder,
+                            &refund_amount,
+                        );
+                        Events::emit_refund_issued(
+                            &env,
+                            grant_id,
+                            fund_entry.funder.clone(),
+                            refund_amount,
+                            payout_token.clone(),
+                        );
+                    }
+                }
+            }
+            grant
+                .escrow_balances
+                .set(payout_token, current_balance - total_refundable);
             Storage::set_grant(&env, grant_id, &grant);
         }
         Ok(())
@@ -402,7 +437,7 @@ impl StellarGrantsContract {
             owner: owner.clone(),
             title: title.clone(),
             description,
-            token,
+            primary_token: token.clone(),
             status: initial_status,
             total_amount,
             milestone_amount,
@@ -410,7 +445,7 @@ impl StellarGrantsContract {
             quorum,
             total_milestones: num_milestones,
             milestones_paid_out: 0,
-            escrow_balance: 0,
+            escrow_balances: soroban_sdk::Map::new(&env), // Initialize empty map
             funders: soroban_sdk::Vec::new(&env),
             reason: None,
             timestamp: env.ledger().timestamp(),
@@ -445,6 +480,7 @@ impl StellarGrantsContract {
                 idx: i,
                 description: String::from_str(&env, ""),
                 amount: milestone_amount,
+                payout_token: token.clone(), // Default to primary token
                 state: MilestoneState::Pending,
                 votes: soroban_sdk::Map::new(&env),
                 approvals: 0,
@@ -459,7 +495,6 @@ impl StellarGrantsContract {
             };
             Storage::set_milestone(&env, grant_id, i, &milestone);
         }
-
         // Enhanced event emission: include all relevant data, standardize topics
         Events::emit_grant_created(&env, grant_id, owner.clone(), title.clone(), total_amount);
 
@@ -759,56 +794,60 @@ impl StellarGrantsContract {
                 return Err(ContractError::InvalidState);
             }
 
-            let total_refundable = grant.escrow_balance;
-            if total_refundable > 0 {
-                let mut total_contributions: i128 = 0;
-                for fund_entry in grant.funders.iter() {
-                    total_contributions += fund_entry.amount;
-                }
+            for (token, balance) in grant.escrow_balances.iter() {
+                if balance > 0 {
+                    let mut total_token_contributions: i128 = 0;
+                    let mut token_funders = soroban_sdk::Vec::new(&env);
+                    for fund_entry in grant.funders.iter() {
+                        if fund_entry.token == token {
+                            total_token_contributions += fund_entry.amount;
+                            token_funders.push_back(fund_entry);
+                        }
+                    }
 
-                if total_contributions <= 0 {
-                    return Err(ContractError::InvalidInput);
-                }
+                    if total_token_contributions > 0 {
+                        let token_client = token::Client::new(&env, &token);
+                        let token_funders_len = token_funders.len();
+                        let mut distributed = 0i128;
 
-                let token_client = token::Client::new(&env, &grant.token);
-                let funders_len = grant.funders.len();
-                let mut distributed = 0i128;
+                        for i in 0..token_funders_len {
+                            let fund_entry = token_funders.get(i).unwrap();
+                            let is_last = i + 1 == token_funders_len;
+                            let refund_amount = if is_last {
+                                balance - distributed
+                            } else {
+                                let amount = fund_entry
+                                    .amount
+                                    .checked_mul(balance)
+                                    .ok_or(ContractError::InvalidInput)?
+                                    .checked_div(total_token_contributions)
+                                    .ok_or(ContractError::InvalidInput)?;
+                                distributed += amount;
+                                amount
+                            };
 
-                for i in 0..funders_len {
-                    let fund_entry = grant.funders.get(i).unwrap();
-                    let is_last = i + 1 == funders_len;
-                    let refund_amount = if is_last {
-                        total_refundable - distributed
-                    } else {
-                        let amount = fund_entry
-                            .amount
-                            .checked_mul(total_refundable)
-                            .ok_or(ContractError::InvalidInput)?
-                            .checked_div(total_contributions)
-                            .ok_or(ContractError::InvalidInput)?;
-                        distributed += amount;
-                        amount
-                    };
-
-                    if refund_amount > 0 {
-                        token_client.transfer(
-                            &env.current_contract_address(),
-                            &fund_entry.funder,
-                            &refund_amount,
-                        );
-                        Events::emit_refund_issued(
-                            &env,
-                            grant_id,
-                            fund_entry.funder.clone(),
-                            refund_amount,
-                        );
+                            if refund_amount > 0 {
+                                token_client.transfer(
+                                    &env.current_contract_address(),
+                                    &fund_entry.funder,
+                                    &refund_amount,
+                                );
+                                Events::emit_refund_issued(
+                                    &env,
+                                    grant_id,
+                                    fund_entry.funder.clone(),
+                                    refund_amount,
+                                    token.clone(),
+                                );
+                            }
+                        }
                     }
                 }
             }
 
             // Update state
             grant.status = GrantStatus::Cancelled;
-            grant.escrow_balance = 0;
+            grant.escrow_balances = soroban_sdk::Map::new(&env);
             grant.reason = Some(reason.clone());
             grant.timestamp = env.ledger().timestamp();
 
@@ -824,7 +863,7 @@ impl StellarGrantsContract {
                 grant_id,
                 caller.clone(),
                 reason.clone(),
-                total_refundable,
+                0, // Total refund amount is now per-token, so we use 0 as placeholder here or could aggregate
             );
 
             Ok(())
@@ -971,11 +1010,15 @@ impl StellarGrantsContract {
 
         let total_paid =
             Self::compute_total_paid_if_quorum_ready(env, grant_id, grant.total_milestones)?;
-        if grant.escrow_balance < total_paid {
+        let escrow_bal = grant
+            .escrow_balances
+            .get(grant.primary_token.clone())
+            .unwrap_or(0);
+        if escrow_bal < total_paid {
             return Err(ContractError::InvalidInput);
         }
-        let remaining_balance = grant.escrow_balance - total_paid;
-        let token_client = token::Client::new(env, &grant.token);
+        let remaining_balance = escrow_bal - total_paid;
+        let token_client = token::Client::new(env, &grant.primary_token);
 
         if total_paid > 0 {
             token_client.transfer(&env.current_contract_address(), &grant.owner, &total_paid);
@@ -1038,13 +1081,19 @@ impl StellarGrantsContract {
                         milestone_idx,
                         MilestoneState::Paid,
                     );
-                    Events::emit_milestone_paid(env, grant_id, milestone_idx, milestone.amount);
+                    Events::emit_milestone_paid(
+                        env,
+                        grant_id,
+                        milestone_idx,
+                        milestone.amount,
+                        milestone.payout_token.clone(),
+                    );
                 }
             }
         }
 
         grant.status = GrantStatus::Completed;
-        grant.escrow_balance = 0;
+        grant.escrow_balances = soroban_sdk::Map::new(env);
         grant.milestones_paid_out = grant.total_milestones;
         grant.timestamp = env.ledger().timestamp();
         Storage::set_grant(env, grant_id, &grant);
@@ -1356,6 +1405,7 @@ impl StellarGrantsContract {
         recipient: Address,
         description: String,
         proof_url: String,
+        payout_token: Option<Address>, // New parameter
     ) -> Result<(), ContractError> {
         recipient.require_auth();
 
@@ -1383,6 +1433,7 @@ impl StellarGrantsContract {
             milestone_idx,
             description,
             proof_url,
+            payout_token,
         )
     }
 
@@ -1431,6 +1482,7 @@ impl StellarGrantsContract {
                 sub.idx,
                 sub.description.clone(),
                 sub.proof.clone(),
+                sub.payout_token.clone(),
             )?;
         }
 
@@ -1453,6 +1505,7 @@ impl StellarGrantsContract {
         grant_id: u64,
         funder: Address,
         amount: i128,
+        token: Address, // New parameter
         memo: Option<String>,
     ) -> Result<(), ContractError> {
         funder.require_auth();
@@ -1474,42 +1527,46 @@ impl StellarGrantsContract {
             }
 
             // Perform the token transfer from the funder to the contract
-            let token_client = token::Client::new(&env, &grant.token);
+            let token_client = token::Client::new(&env, &token);
             let contract_address = env.current_contract_address();
             token_client.transfer(&funder, &contract_address, &amount);
 
-            // Update escrow balance with overflow protection
-            grant.escrow_balance = grant
-                .escrow_balance
+            // Update escrow balance for this specific token
+            let current_balance = grant.escrow_balances.get(token.clone()).unwrap_or(0);
+            let new_balance = current_balance
                 .checked_add(amount)
                 .ok_or(ContractError::InvalidInput)?;
+            grant.escrow_balances.set(token.clone(), new_balance);
 
-            // Update funds tracking
-            let mut funder_found = false;
+            // Update funds tracking (per token)
+            let mut fund_entry_found = false;
             for i in 0..grant.funders.len() {
                 let mut fund_entry = grant.funders.get(i).unwrap();
-                if fund_entry.funder == funder {
+                if fund_entry.funder == funder && fund_entry.token == token {
                     fund_entry.amount = fund_entry
                         .amount
                         .checked_add(amount)
                         .ok_or(ContractError::InvalidInput)?;
                     grant.funders.set(i, fund_entry);
-                    funder_found = true;
+                    fund_entry_found = true;
                     break;
                 }
             }
 
-            if !funder_found {
+            if !fund_entry_found {
                 grant.funders.push_back(GrantFund {
                     funder: funder.clone(),
                     amount,
+                    token: token.clone(),
                 });
             }
 
-            // Auto-transition PendingFunding → Active once threshold is met
-            if grant.status == GrantStatus::PendingFunding
-                && grant.escrow_balance >= grant.min_funding
-            {
+            // Auto-transition PendingFunding → Active once threshold is met (based on primary token)
+            let primary_balance = grant
+                .escrow_balances
+                .get(grant.primary_token.clone())
+                .unwrap_or(0);
+            if grant.status == GrantStatus::PendingFunding && primary_balance >= grant.min_funding {
                 grant.status = GrantStatus::Active;
                 Storage::index_transition(
                     &env,
@@ -1523,8 +1580,7 @@ impl StellarGrantsContract {
             Storage::set_grant(&env, grant_id, &grant);
 
             // Enhanced event emission: include all relevant data, standardize topics
-            Events::emit_grant_funded(&env, grant_id, funder.clone(), amount, grant.escrow_balance);
-            Events::emit_grant_funded(&env, grant_id, funder.clone(), amount, grant.escrow_balance);
+            Events::emit_grant_funded(&env, grant_id, funder.clone(), amount, token, new_balance);
             Events::emit_payer_receipt(&env, grant_id, funder, amount, memo);
 
             Ok(())
@@ -1877,7 +1933,7 @@ impl StellarGrantsContract {
             }
 
             let contract_addr = env.current_contract_address();
-            let client = token::Client::new(&env, &grant.token);
+            let client = token::Client::new(&env, &grant.primary_token);
             client.transfer(&reviewer, &contract_addr, &amount);
 
             let current = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
@@ -1908,7 +1964,7 @@ impl StellarGrantsContract {
             }
 
             let treasury = Storage::get_treasury(&env).ok_or(ContractError::InvalidInput)?;
-            let client = token::Client::new(&env, &grant.token);
+            let client = token::Client::new(&env, &grant.primary_token);
             client.transfer(&env.current_contract_address(), &treasury, &stake);
 
             Storage::set_reviewer_stake(&env, grant_id, &reviewer, 0);
@@ -1932,7 +1988,7 @@ impl StellarGrantsContract {
                 return Err(ContractError::StakeNotFound);
             }
 
-            let client = token::Client::new(&env, &grant.token);
+            let client = token::Client::new(&env, &grant.primary_token);
             client.transfer(&env.current_contract_address(), &reviewer, &stake);
 
             Storage::set_reviewer_stake(&env, grant_id, &reviewer, 0);
@@ -1969,7 +2025,7 @@ impl StellarGrantsContract {
     pub fn fund_batch(
         env: Env,
         funder: Address,
-        grants: Vec<(u64, i128)>,
+        grants: Vec<(u64, i128, Address)>,
     ) -> Result<(), ContractError> {
         funder.require_auth();
 
@@ -1983,7 +2039,7 @@ impl StellarGrantsContract {
             }
 
             for item in grants.iter() {
-                let (grant_id, amount) = item;
+                let (grant_id, amount, token) = item;
                 if amount <= 0 {
                     return Err(ContractError::InvalidInput);
                 }
@@ -1996,39 +2052,57 @@ impl StellarGrantsContract {
                 if grant.status == GrantStatus::Inactive {
                     return Err(ContractError::HeartbeatMissed);
                 }
-                if grant.status != GrantStatus::Active {
+                if grant.status != GrantStatus::Active
+                    && grant.status != GrantStatus::PendingFunding
+                {
                     return Err(ContractError::InvalidState);
                 }
 
                 let contract_addr = env.current_contract_address();
-                let client = token::Client::new(&env, &grant.token);
+                let client = token::Client::new(&env, &token);
                 client.transfer(&funder, &contract_addr, &amount);
 
-                grant.escrow_balance = grant
-                    .escrow_balance
+                let current_balance = grant.escrow_balances.get(token.clone()).unwrap_or(0);
+                let new_balance = current_balance
                     .checked_add(amount)
                     .ok_or(ContractError::InvalidInput)?;
+                grant.escrow_balances.set(token.clone(), new_balance);
 
                 let mut found = false;
-                let mut new_funders = soroban_sdk::Vec::new(&env);
-                for f in grant.funders.iter() {
-                    if f.funder == funder {
-                        new_funders.push_back(GrantFund {
-                            funder: f.funder,
-                            amount: f.amount + amount,
-                        });
+                for i in 0..grant.funders.len() {
+                    let mut fund_entry = grant.funders.get(i).unwrap();
+                    if fund_entry.funder == funder && fund_entry.token == token {
+                        fund_entry.amount += amount;
+                        grant.funders.set(i, fund_entry);
                         found = true;
-                    } else {
-                        new_funders.push_back(f);
+                        break;
                     }
                 }
                 if !found {
-                    new_funders.push_back(GrantFund {
+                    grant.funders.push_back(GrantFund {
                         funder: funder.clone(),
                         amount,
+                        token: token.clone(),
                     });
                 }
-                grant.funders = new_funders;
+
+                // Auto-activate if threshold met
+                let primary_balance = grant
+                    .escrow_balances
+                    .get(grant.primary_token.clone())
+                    .unwrap_or(0);
+                if grant.status == GrantStatus::PendingFunding
+                    && primary_balance >= grant.min_funding
+                {
+                    grant.status = GrantStatus::Active;
+                    Storage::index_transition(
+                        &env,
+                        GrantStatus::PendingFunding as u32,
+                        GrantStatus::Active as u32,
+                        grant_id,
+                    );
+                    Events::emit_grant_activated(&env, grant.id);
+                }
 
                 Storage::set_grant(&env, grant_id, &grant);
 
@@ -2037,7 +2111,8 @@ impl StellarGrantsContract {
                     grant_id,
                     funder.clone(),
                     amount,
-                    grant.escrow_balance,
+                    token,
+                    new_balance,
                 );
                 Events::emit_payer_receipt(&env, grant_id, funder.clone(), amount, None);
             }
@@ -2144,15 +2219,8 @@ fn apply_milestone_submission(
     milestone_idx: u32,
     description: String,
     proof_url: String,
+    payout_token: Option<Address>,
 ) -> Result<(), ContractError> {
-    if Storage::is_blacklisted(env, &grant.owner) {
-        return Err(ContractError::Blacklisted);
-    }
-
-    if grant.status == GrantStatus::Inactive {
-        return Err(ContractError::HeartbeatMissed);
-    }
-
     if milestone_idx >= grant.total_milestones {
         return Err(ContractError::InvalidInput);
     }
@@ -2177,6 +2245,9 @@ fn apply_milestone_submission(
     // Milestone enters the community review window before official voting opens.
     milestone.state = MilestoneState::CommunityReview;
     milestone.proof_url = Some(proof_url);
+    if let Some(token) = payout_token {
+        milestone.payout_token = token;
+    }
     milestone.submission_timestamp = env.ledger().timestamp();
 
     Storage::set_milestone(env, grant_id, milestone_idx, &milestone);

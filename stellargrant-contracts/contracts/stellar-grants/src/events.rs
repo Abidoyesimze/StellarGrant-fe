@@ -44,6 +44,7 @@ pub struct MilestonePaid {
     pub grant_id: u64,
     pub milestone_idx: u32,
     pub amount: i128,
+    pub token: Address, // New: Specify the token paid
     pub timestamp: u64,
 }
 
@@ -54,6 +55,7 @@ pub struct MilestoneApproved {
     pub grant_id: u64,
     pub milestone_idx: u32,
     pub payout_amount: i128,
+    pub payout_token: Address, // New: Specify the token approved
     pub recipient: Address,
     pub timestamp: u64,
 }
@@ -65,6 +67,7 @@ pub struct PayoutExecuted {
     pub grant_id: u64,
     pub recipient: Address,
     pub amount: i128,
+    pub token: Address, // New: Specify the token paid
     pub timestamp: u64,
 }
 
@@ -96,6 +99,7 @@ pub struct RefundIssued {
     pub grant_id: u64,
     pub funder: Address,
     pub amount: i128,
+    pub token: Address, // New: Specify which token was refunded
     pub timestamp: u64,
 }
 
@@ -157,6 +161,7 @@ pub struct GrantFunded {
     pub grant_id: u64,
     pub funder: Address,
     pub amount: i128,
+    pub token: Address, // New: Specify which token was funded
     pub new_balance: i128,
     pub timestamp: u64,
 }
@@ -311,12 +316,19 @@ impl Events {
         event.publish(env);
     }
 
-    pub fn emit_refund_issued(env: &Env, grant_id: u64, funder: Address, amount: i128) {
+    pub fn emit_refund_issued(
+        env: &Env,
+        grant_id: u64,
+        funder: Address,
+        amount: i128,
+        token: Address,
+    ) {
         let event = RefundIssued {
             event_version: EVENT_VERSION,
             grant_id,
             funder,
             amount,
+            token,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
@@ -370,6 +382,7 @@ impl Events {
         grant_id: u64,
         funder: Address,
         amount: i128,
+        token: Address,
         new_balance: i128,
     ) {
         let event = GrantFunded {
@@ -377,6 +390,7 @@ impl Events {
             grant_id,
             funder,
             amount,
+            token,
             new_balance,
             timestamp: env.ledger().timestamp(),
         };
@@ -507,12 +521,19 @@ impl Events {
         event.publish(env);
     }
 
-    pub fn emit_milestone_paid(env: &Env, grant_id: u64, milestone_idx: u32, amount: i128) {
+    pub fn emit_milestone_paid(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        amount: i128,
+        token: Address,
+    ) {
         let event = MilestonePaid {
             event_version: EVENT_VERSION,
             grant_id,
             milestone_idx,
             amount,
+            token,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
@@ -523,6 +544,7 @@ impl Events {
         grant_id: u64,
         milestone_idx: u32,
         payout_amount: i128,
+        payout_token: Address,
         recipient: Address,
     ) {
         let event = MilestoneApproved {
@@ -530,18 +552,26 @@ impl Events {
             grant_id,
             milestone_idx,
             payout_amount,
+            payout_token,
             recipient,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
     }
 
-    pub fn emit_payout_executed(env: &Env, grant_id: u64, recipient: Address, amount: i128) {
+    pub fn emit_payout_executed(
+        env: &Env,
+        grant_id: u64,
+        recipient: Address,
+        amount: i128,
+        token: Address,
+    ) {
         let event = PayoutExecuted {
             event_version: EVENT_VERSION,
             grant_id,
             recipient,
             amount,
+            token,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);

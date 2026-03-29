@@ -36,7 +36,7 @@ fn test_event_emission_on_grant_create_and_fund() {
     client.grant_accept(&grant_id, &owner);
     let funder = <Address as TestAddress>::generate(&env);
     token_admin.mint(&funder, &100);
-    client.grant_fund(&grant_id, &funder, &100, &None);
+    client.grant_fund(&grant_id, &funder, &100, &token, &None);
     let events = env.events().all();
     // Debug print all events
     println!("All events:");
@@ -86,13 +86,14 @@ fn test_event_emission_on_milestone_vote() {
     client.grant_accept(&grant_id, &owner);
     let funder = <Address as TestAddress>::generate(&env);
     token_admin.mint(&funder, &100);
-    client.grant_fund(&grant_id, &funder, &100, &None);
+    client.grant_fund(&grant_id, &funder, &100, &token, &None);
     client.milestone_submit(
         &grant_id,
         &0,
         &owner,
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
+        &None,
     );
     // Advance ledger timestamp by COMMUNITY_REVIEW_PERIOD to allow voting
     const COMMUNITY_REVIEW_PERIOD: u64 = 3 * 24 * 60 * 60;

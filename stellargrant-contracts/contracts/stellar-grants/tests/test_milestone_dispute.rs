@@ -35,6 +35,7 @@ fn test_dispute_and_resolve_flow() {
         &None,
         &0i128,
         &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     client.grant_accept(&grant_id, &owner);
     let funder = Address::generate(&env);
@@ -90,6 +91,7 @@ fn test_vote_blocked_during_dispute() {
         &None,
         &0i128,
         &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     client.grant_accept(&grant_id, &owner);
     let funder = Address::generate(&env);
@@ -144,6 +146,7 @@ fn test_only_council_can_resolve_dispute() {
         &None,
         &0i128,
         &0i128,
+        &soroban_sdk::Vec::<soroban_sdk::String>::new(&env),
     );
     client.grant_accept(&grant_id, &owner);
     let funder = Address::generate(&env);

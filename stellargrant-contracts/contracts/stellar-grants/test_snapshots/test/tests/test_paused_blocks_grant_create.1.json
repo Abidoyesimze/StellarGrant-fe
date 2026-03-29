@@ -113,6 +113,9 @@
                 },
                 {
                   "i128": "0"
+                },
+                {
+                  "vec": []
                 }
               ]
             }
@@ -386,6 +389,14 @@
                     },
                     "val": {
                       "u32": 8
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "tags"
+                    },
+                    "val": {
+                      "vec": []
                     }
                   },
                   {
@@ -1028,6 +1039,14 @@
                   },
                   "val": {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "tags"
+                  },
+                  "val": {
+                    "vec": []
                   }
                 },
                 {

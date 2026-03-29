@@ -366,6 +366,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "tags"
+                    },
+                    "val": {
+                      "vec": []
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "timestamp"
                     },
                     "val": {

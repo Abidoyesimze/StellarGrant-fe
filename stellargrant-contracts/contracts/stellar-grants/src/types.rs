@@ -45,6 +45,10 @@ pub enum ContractError {
     ContractPaused = 33,
     /// Donation would exceed the grant's hard cap.
     CapReached = 34,
+    /// Grant has more than 5 tags.
+    TooManyTags = 35,
+    /// A tag exceeds 20 characters.
+    TagTooLong = 36,
 }
 
 #[contracttype]
@@ -177,6 +181,8 @@ pub struct Grant {
     pub min_funding: i128,
     /// Maximum total funding allowed across all tokens. 0 means no cap.
     pub hard_cap: i128,
+    /// Tags/categories for the grant (max 5 tags, each max 20 chars).
+    pub tags: Vec<String>,
 }
 
 #[contracttype]

@@ -1,5 +1,5 @@
 use crate::types::MilestoneState;
-use soroban_sdk::{contractevent, Address, BytesN, Env, String};
+use soroban_sdk::{contractevent, Address, BytesN, Env, String, Vec};
 
 const EVENT_VERSION: u32 = 1;
 const GLOBAL_EVENT_GRANT_ID: u64 = 0;
@@ -185,6 +185,7 @@ pub struct GrantCreated {
     pub owner: Address,
     pub title: String,
     pub total_amount: i128,
+    pub tags: Vec<String>,
     pub timestamp: u64,
 }
 
@@ -414,6 +415,7 @@ impl Events {
         owner: Address,
         title: String,
         total_amount: i128,
+        tags: Vec<String>,
     ) {
         let event = GrantCreated {
             event_version: EVENT_VERSION,
@@ -421,6 +423,7 @@ impl Events {
             owner,
             title,
             total_amount,
+            tags,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);

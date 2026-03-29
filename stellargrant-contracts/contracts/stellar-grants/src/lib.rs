@@ -492,6 +492,7 @@ impl StellarGrantsContract {
         milestone_deadlines: Option<soroban_sdk::Vec<u64>>,
         min_funding: i128,
         hard_cap: i128,
+        tags: soroban_sdk::Vec<String>,
     ) -> Result<u64, ContractError> {
         owner.require_auth();
         assert_not_paused(&env)?;
@@ -526,6 +527,18 @@ impl StellarGrantsContract {
             return Err(ContractError::InvalidInput);
         }
 
+        // Validate tags: max 5 tags, each max 20 chars
+        if tags.len() > 5 {
+            return Err(ContractError::TooManyTags);
+        }
+        for i in 0..tags.len() {
+            if let Some(tag) = tags.get(i) {
+                if tag.len() > 20 {
+                    return Err(ContractError::TagTooLong);
+                }
+            }
+        }
+
         let grant_id = Storage::increment_grant_counter(&env);
 
         // All grants start in PendingAcceptance; the recipient (owner) must explicitly
@@ -553,6 +566,7 @@ impl StellarGrantsContract {
             cancellation_requested_at: None,
             min_funding,
             hard_cap,
+            tags: tags.clone(),
         };
 
         Storage::set_grant(&env, grant_id, &grant);
@@ -597,7 +611,14 @@ impl StellarGrantsContract {
             Storage::set_milestone(&env, grant_id, i, &milestone);
         }
         // Enhanced event emission: include all relevant data, standardize topics
-        Events::emit_grant_created(&env, grant_id, owner.clone(), title.clone(), total_amount);
+        Events::emit_grant_created(
+            &env,
+            grant_id,
+            owner.clone(),
+            title.clone(),
+            total_amount,
+            tags,
+        );
 
         Ok(grant_id)
     }
@@ -676,6 +697,7 @@ impl StellarGrantsContract {
             None,
             0,
             0,
+            soroban_sdk::Vec::new(&env),
         )?;
         Storage::set_grant_min_reputation(&env, grant_id, min_reputation_score);
         Ok(grant_id)
@@ -731,6 +753,7 @@ impl StellarGrantsContract {
             None,
             0,
             0,
+            soroban_sdk::Vec::new(&env),
         )?;
 
         Storage::set_escrow_state(

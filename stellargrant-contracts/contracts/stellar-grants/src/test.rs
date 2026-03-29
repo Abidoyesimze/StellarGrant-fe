@@ -193,6 +193,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(env, grant_id, &grant);
@@ -523,6 +524,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -603,6 +605,7 @@ mod tests {
             last_heartbeat: env.ledger().timestamp(),
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
         };
 
         env.as_contract(&contract_id, || {
@@ -675,6 +678,7 @@ mod tests {
             last_heartbeat: env.ledger().timestamp(),
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
         };
 
         env.as_contract(&contract_id, || {
@@ -739,6 +743,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -783,6 +788,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -854,6 +860,7 @@ mod tests {
             last_heartbeat: env.ledger().timestamp(),
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
             cancellation_requested_at: None,
         };
 
@@ -925,6 +932,7 @@ mod tests {
             last_heartbeat: env.ledger().timestamp(),
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
             cancellation_requested_at: None,
         };
 
@@ -1013,6 +1021,7 @@ mod tests {
             last_heartbeat: 0,
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
             cancellation_requested_at: None,
         };
 
@@ -1102,6 +1111,7 @@ mod tests {
             last_heartbeat: 0,
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
             cancellation_requested_at: None,
         };
 
@@ -1347,6 +1357,7 @@ mod tests {
             last_heartbeat: 0,
             min_funding: 0,
             hard_cap: 0,
+            tags: Vec::new(&env),
             cancellation_requested_at: None,
         };
 
@@ -1431,6 +1442,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         client.grant_accept(&grant_id, &owner);
@@ -1612,6 +1624,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -1690,6 +1703,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -1928,6 +1942,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -1985,6 +2000,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -2115,6 +2131,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -2168,6 +2185,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -2231,6 +2249,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -2288,6 +2307,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -2332,6 +2352,7 @@ mod tests {
             &None, // milestone_deadlines
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         assert_eq!(grant_id, 1);
@@ -2381,6 +2402,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res1, Err(Ok(ContractError::InvalidInput.into())));
 
@@ -2398,6 +2420,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res2, Err(Ok(ContractError::InvalidInput.into())));
     }
@@ -2429,6 +2452,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res1, Err(Ok(ContractError::InvalidInput.into())));
 
@@ -2446,6 +2470,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res2, Err(Ok(ContractError::InvalidInput.into())));
     }
@@ -2476,6 +2501,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res, Err(Ok(ContractError::InvalidInput.into())));
     }
@@ -2508,6 +2534,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(res, Err(Ok(ContractError::InvalidInput.into())));
     }
@@ -2538,6 +2565,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert!(res.is_err());
     }
@@ -2568,6 +2596,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(created, 1);
 
@@ -2611,6 +2640,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         env.as_contract(&contract_id, || {
@@ -2981,6 +3011,7 @@ mod tests {
             &Some(deadlines),
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         env.as_contract(&client.address, || {
@@ -3024,6 +3055,7 @@ mod tests {
             &Some(deadlines),
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(result, Err(Ok(ContractError::InvalidInput.into())));
     }
@@ -3063,6 +3095,7 @@ mod tests {
                 last_heartbeat: 0,
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -3335,6 +3368,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -3481,6 +3515,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -3529,6 +3564,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
                 cancellation_requested_at: None,
             };
             Storage::set_grant(&env, grant_id, &grant);
@@ -3982,6 +4018,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4134,6 +4171,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4246,6 +4284,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         client.grant_accept(&grant_id, &owner);
         client.grant_pause(&grant_id, &owner);
@@ -4288,6 +4327,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4335,6 +4375,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4376,6 +4417,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4429,6 +4471,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4486,6 +4529,7 @@ mod tests {
             &None,
             &500i128, // min_funding = 500
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         env.as_contract(&client.address, || {
@@ -4518,6 +4562,7 @@ mod tests {
             &None,
             &0i128, // no min_funding
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         env.as_contract(&client.address, || {
@@ -4566,6 +4611,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4620,6 +4666,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 500,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4675,6 +4722,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 500,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -4970,6 +5018,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(result, Err(Ok(ContractError::ContractPaused.into())));
 
@@ -4988,6 +5037,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
         assert_eq!(grant_id, 1);
     }
@@ -5101,6 +5151,7 @@ mod tests {
                 last_heartbeat: env.ledger().timestamp(),
                 min_funding: 0,
                 hard_cap: 0,
+                tags: Vec::new(&env),
             };
             Storage::set_grant(&env, grant_id, &grant);
         });
@@ -5568,6 +5619,7 @@ mod tests {
             &None,
             &0i128,
             &0i128,
+            &Vec::<String>::new(&env),
         );
 
         client.grant_accept(&grant_id, &owner);
@@ -5637,6 +5689,7 @@ mod tests {
             &None,
             &0i128,
             &500i128, // hard_cap = 500
+            &Vec::<String>::new(&env),
         );
         client.grant_accept(&grant_id, &owner);
 
@@ -5685,6 +5738,7 @@ mod tests {
             &None,
             &0i128,
             &500i128, // hard_cap = 500
+            &Vec::<String>::new(&env),
         );
         client.grant_accept(&grant_id, &owner);
 
@@ -5731,6 +5785,7 @@ mod tests {
             &None,
             &0i128,
             &0i128, // hard_cap = 0 means no cap
+            &Vec::<String>::new(&env),
         );
         client.grant_accept(&grant_id, &owner);
 
@@ -5746,5 +5801,128 @@ mod tests {
                 10_000
             );
         });
+    }
+
+    #[test]
+    fn test_grant_create_with_tags() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let client = StellarGrantsContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+        let token_admin_addr = Address::generate(&env);
+        let token_id = env
+            .register_stellar_asset_contract_v2(token_admin_addr.clone())
+            .address();
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+
+        let mut tags = Vec::new(&env);
+        tags.push_back(String::from_str(&env, "DeFi"));
+        tags.push_back(String::from_str(&env, "Bridge"));
+        tags.push_back(String::from_str(&env, "Stellar"));
+
+        let grant_id = client.grant_create(
+            &owner,
+            &String::from_str(&env, "Tagged Grant"),
+            &String::from_str(&env, "A grant with tags"),
+            &token_id,
+            &500,
+            &500,
+            &1,
+            &reviewers,
+            &1u32,
+            &None,
+            &0i128,
+            &0i128,
+            &tags,
+        );
+
+        env.as_contract(&contract_id, || {
+            let grant = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(grant.tags.len(), 3);
+            assert_eq!(grant.tags.get(0).unwrap(), String::from_str(&env, "DeFi"));
+            assert_eq!(grant.tags.get(1).unwrap(), String::from_str(&env, "Bridge"));
+            assert_eq!(
+                grant.tags.get(2).unwrap(),
+                String::from_str(&env, "Stellar")
+            );
+        });
+    }
+
+    #[test]
+    fn test_grant_create_rejects_too_many_tags() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let client = StellarGrantsContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+        let token_admin_addr = Address::generate(&env);
+        let token_id = env
+            .register_stellar_asset_contract_v2(token_admin_addr.clone())
+            .address();
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+
+        let mut tags = Vec::new(&env);
+        for i in 0..6u32 {
+            tags.push_back(String::from_str(&env, "tag"));
+            let _ = i;
+        }
+
+        let result = client.try_grant_create(
+            &owner,
+            &String::from_str(&env, "Too Many Tags"),
+            &String::from_str(&env, "Desc"),
+            &token_id,
+            &500,
+            &500,
+            &1,
+            &reviewers,
+            &1u32,
+            &None,
+            &0i128,
+            &0i128,
+            &tags,
+        );
+        assert!(result.is_err(), "Should reject more than 5 tags");
+    }
+
+    #[test]
+    fn test_grant_create_rejects_tag_too_long() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let client = StellarGrantsContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let reviewer = Address::generate(&env);
+        let token_admin_addr = Address::generate(&env);
+        let token_id = env
+            .register_stellar_asset_contract_v2(token_admin_addr.clone())
+            .address();
+        let mut reviewers = Vec::new(&env);
+        reviewers.push_back(reviewer.clone());
+
+        let mut tags = Vec::new(&env);
+        tags.push_back(String::from_str(&env, "ThisTagIsWayTooLong!!")); // 21 chars
+
+        let result = client.try_grant_create(
+            &owner,
+            &String::from_str(&env, "Long Tag"),
+            &String::from_str(&env, "Desc"),
+            &token_id,
+            &500,
+            &500,
+            &1,
+            &reviewers,
+            &1u32,
+            &None,
+            &0i128,
+            &0i128,
+            &tags,
+        );
+        assert!(result.is_err(), "Should reject tags longer than 20 chars");
     }
 }

@@ -171,28 +171,22 @@ mod tests {
     ) {
         env.as_contract(contract_id, || {
             let quorum = (reviewers.len() / 2) + 1;
-            let mut grant = Grant::new(
+            let grant = Grant::new(
                 grant_id,
                 owner,
-                String::from_str(&env, "Test"),
-                String::from_str(&env, "Desc"),
+                String::from_str(env, "Test"),
+                String::from_str(env, "Desc"),
                 token.clone(),
                 1000,
                 500,
                 reviewers,
+                GrantStatus::Active,
                 quorum,
-                total_milestones: 1,
-                milestones_paid_out: 0,
-                escrow_balances,
-                funders: Vec::new(env),
-                reason: None,
-                timestamp: env.ledger().timestamp(),
-                last_heartbeat: env.ledger().timestamp(),
-                min_funding: 0,
-                hard_cap: 0,
-                tags: Vec::new(&env),
-                cancellation_requested_at: None,
-            };
+                1,
+                env.ledger().timestamp(),
+                0,
+                env,
+            );
             Storage::set_grant(env, grant_id, &grant);
         });
     }

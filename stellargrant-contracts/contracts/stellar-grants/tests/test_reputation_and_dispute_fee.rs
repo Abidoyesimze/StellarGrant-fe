@@ -151,7 +151,11 @@ fn test_reputation_idempotent_per_milestone() {
         .get_contributor_profile(&owner)
         .unwrap()
         .reputation_score;
-    assert_eq!(rep_after_first, rep_unchanged, "reputation must not double-count");
+    assert_eq!(
+        rep_after_first,
+        rep_unchanged,
+        "reputation must not double-count"
+    );
 }
 
 #[test]

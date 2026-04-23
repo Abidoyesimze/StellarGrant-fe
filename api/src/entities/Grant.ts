@@ -1,7 +1,10 @@
-import { Column, Entity, OneToMany, PrimaryColumn, UpdateDateColumn } from "typeorm";
+import { Column, Entity, Index, OneToMany, PrimaryColumn, UpdateDateColumn } from "typeorm";
 import { MilestoneProof } from "./MilestoneProof";
 
 @Entity({ name: "grants" })
+@Index("IDX_grants_status", ["status"])
+@Index("IDX_grants_updated_at", ["updatedAt"])
+@Index("IDX_grants_total_amount", ["totalAmount"])
 export class Grant {
   @PrimaryColumn({ type: "int" })
   id!: number;
@@ -17,6 +20,13 @@ export class Grant {
 
   @Column({ type: "varchar", length: 60 })
   totalAmount!: string;
+
+  /**
+   * Comma-separated tags stored as a simple text column for broad DB compatibility.
+   * The route layer splits / joins this value when reading / writing.
+   */
+  @Column({ type: "text", nullable: true })
+  tags!: string | null;
 
   @UpdateDateColumn()
   updatedAt!: Date;

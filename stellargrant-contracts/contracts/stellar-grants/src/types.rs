@@ -79,7 +79,12 @@ pub struct EscrowState {
 }
 
 impl EscrowState {
-    pub fn new(mode: EscrowMode, lifecycle: EscrowLifecycleState, quorum_ready: bool, approvals_count: u32) -> Self {
+    pub fn new(
+        mode: EscrowMode,
+        lifecycle: EscrowLifecycleState,
+        quorum_ready: bool,
+        approvals_count: u32,
+    ) -> Self {
         let mut state = Self { packed_stats: 0 };
         state.set_mode(mode);
         state.set_lifecycle(lifecycle);
@@ -110,7 +115,8 @@ impl EscrowState {
     }
 
     pub fn set_lifecycle(&mut self, lifecycle: EscrowLifecycleState) {
-        self.packed_stats = (self.packed_stats & !(0xFFFFFFFF << 32)) | ((lifecycle as u32 as u128) << 32);
+        self.packed_stats =
+            (self.packed_stats & !(0xFFFFFFFF << 32)) | ((lifecycle as u32 as u128) << 32);
     }
 
     pub fn quorum_ready(&self) -> bool {
@@ -168,7 +174,14 @@ pub struct Milestone {
 }
 
 impl Milestone {
-    pub fn new(idx: u32, description: String, amount: i128, payout_token: Address, deadline: u64, env: &soroban_sdk::Env) -> Self {
+    pub fn new(
+        idx: u32,
+        description: String,
+        amount: i128,
+        payout_token: Address,
+        deadline: u64,
+        env: &soroban_sdk::Env,
+    ) -> Self {
         let mut m = Self {
             idx,
             description,
@@ -221,7 +234,8 @@ impl Milestone {
     }
 
     pub fn set_rejections(&mut self, rejections: u32) {
-        self.packed_stats = (self.packed_stats & !(0xFFFFFFFF << 64)) | ((rejections as u128) << 64);
+        self.packed_stats =
+            (self.packed_stats & !(0xFFFFFFFF << 64)) | ((rejections as u128) << 64);
     }
 
     pub fn community_upvotes(&self) -> u32 {

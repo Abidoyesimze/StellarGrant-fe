@@ -3,19 +3,153 @@ import { Repository } from "typeorm";
 import { Grant } from "../entities/Grant";
 import { GrantSyncService } from "../services/grant-sync-service";
 
-export const buildGrantRouter = (grantRepo: Repository<Grant>, syncService: GrantSyncService) => {
+// ---------------------------------------------------------------------------
+// Query-param validation helpers
+// ---------------------------------------------------------------------------
+
+const VALID_SORT_FIELDS = ["updatedAt", "totalAmount", "id"] as const;
+type SortField = (typeof VALID_SORT_FIELDS)[number];
+
+const VALID_SORT_ORDERS = ["ASC", "DESC"] as const;
+type SortOrder = (typeof VALID_SORT_ORDERS)[number];
+
+function parsePagination(pageStr: unknown, limitStr: unknown) {
+  const page = parseInt(String(pageStr ?? "1"), 10);
+  const limit = parseInt(String(limitStr ?? "20"), 10);
+
+  if (!Number.isFinite(page) || page < 1)
+    return { error: "page must be a positive integer" };
+  if (!Number.isFinite(limit) || limit < 1 || limit > 100)
+    return { error: "limit must be between 1 and 100" };
+
+  return { page, limit };
+}
+
+function parseSortField(raw: unknown): SortField {
+  const candidate = String(raw ?? "").trim();
+  return VALID_SORT_FIELDS.includes(candidate as SortField)
+    ? (candidate as SortField)
+    : "id";
+}
+
+function parseSortOrder(raw: unknown): SortOrder {
+  const candidate = String(raw ?? "").toUpperCase().trim();
+  return VALID_SORT_ORDERS.includes(candidate as SortOrder)
+    ? (candidate as SortOrder)
+    : "ASC";
+}
+
+/**
+ * tags: supports comma-separated or repeated query params
+ */
+function parseTags(raw: unknown): string[] {
+  if (!raw) return [];
+
+  const values = Array.isArray(raw) ? raw : [raw];
+
+  return [...new Set(
+    values
+      .flatMap((v) => String(v).split(","))
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+export const buildGrantRouter = (
+  grantRepo: Repository<Grant>,
+  syncService: GrantSyncService,
+) => {
   const router = Router();
 
-  router.get("/", async (_req, res, next) => {
+  router.get("/", async (req, res, next) => {
     try {
       await syncService.syncAllGrants();
-      const grants = await grantRepo.find({ order: { id: "ASC" } });
-      res.json({ data: grants });
+
+      // ---------------- Pagination ----------------
+      const pagination = parsePagination(req.query.page, req.query.limit);
+      if ("error" in pagination) {
+        res.status(400).json({ error: pagination.error });
+        return;
+      }
+
+      const { page, limit } = pagination;
+
+      // ---------------- Sorting ----------------
+      const sortBy = parseSortField(req.query.sortBy);
+      const order = parseSortOrder(req.query.order);
+
+      // ---------------- Filters ----------------
+      const statusFilter = req.query.status
+        ? String(req.query.status).trim().toLowerCase()
+        : null;
+
+      const funderFilter = req.query.funder
+        ? String(req.query.funder).trim()
+        : null;
+
+      const tagsFilter = parseTags(req.query.tags);
+
+      // ---------------- Query Builder ----------------
+      const qb = grantRepo.createQueryBuilder("grant");
+
+      // ⚡ Filters first (better index usage)
+      if (statusFilter) {
+        qb.andWhere("LOWER(grant.status) = :status", {
+          status: statusFilter,
+        });
+      }
+
+      if (funderFilter) {
+        qb.andWhere("LOWER(grant.recipient) LIKE :funder", {
+          funder: `%${funderFilter.toLowerCase()}%`,
+        });
+      }
+
+      /**
+       * FIXED TAG LOGIC:
+       * Instead of multiple AND LIKE (too strict + slow),
+       * we use OR grouping → matches ANY tag
+       */
+      if (tagsFilter.length > 0) {
+        qb.andWhere(
+          new (require("typeorm").Brackets)((qb1: any) => {
+            tagsFilter.forEach((tag, idx) => {
+              qb1.orWhere(
+                "LOWER(COALESCE(grant.tags, '')) LIKE :tag" + idx,
+                { ["tag" + idx]: `%${tag}%` },
+              );
+            });
+          }),
+        );
+      }
+
+      // ---------------- Sorting + Pagination ----------------
+      qb.orderBy(`grant.${sortBy}`, order)
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      // ---------------- Execute ----------------
+      const [data, total] = await qb.getManyAndCount();
+
+      res.json({
+        data,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
     } catch (error) {
       next(error);
     }
   });
 
+  // ---------------- Single Grant ----------------
   router.get("/:id", async (req, res, next) => {
     try {
       const id = Number(req.params.id);
@@ -25,6 +159,7 @@ export const buildGrantRouter = (grantRepo: Repository<Grant>, syncService: Gran
       }
 
       await syncService.syncGrant(id);
+
       const grant = await grantRepo.findOne({ where: { id } });
 
       if (!grant) {

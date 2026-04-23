@@ -7,6 +7,7 @@ const mockGrants: SorobanGrant[] = [
     status: "active",
     recipient: "GBRPYHIL2C2WBO36G6UIGR2PA4M3TQ7VOY3RTMAL4LRRA67ZOHQ65SZD",
     totalAmount: "250000000",
+    tags: "open-source,web3,tooling",
   },
   {
     id: 2,
@@ -14,6 +15,23 @@ const mockGrants: SorobanGrant[] = [
     status: "review",
     recipient: "GCBQ6JQXQTVV7T7OUVPR4Q6PGACCUAKS6S2YDG3YQYQYRR2NJB5A6NAA",
     totalAmount: "100000000",
+    tags: "climate,data,open-source",
+  },
+  {
+    id: 3,
+    title: "DeFi Infrastructure Fund",
+    status: "active",
+    recipient: "GDZAPKZFP3PVPRMDG6WQVIMZLQ5J3FZGQ27BFLDL3YQSM6L7LS6AXEX",
+    totalAmount: "500000000",
+    tags: "defi,web3,infrastructure",
+  },
+  {
+    id: 4,
+    title: "Community Education Initiative",
+    status: "pending",
+    recipient: "GAV3TIZZ7DRCCMUVKZRQXELRTJFMXQT4XJFNV5BYMNOFXWXZA5MGDVEV",
+    totalAmount: "75000000",
+    tags: "education,community",
   },
 ];
 

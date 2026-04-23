@@ -4,6 +4,8 @@ export type SorobanGrant = {
   status: string;
   recipient: string;
   totalAmount: string;
+  /** Comma-separated tag string, e.g. "web3,climate,open-source" */
+  tags?: string | null;
 };
 
 export interface SorobanContractClient {

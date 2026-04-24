@@ -185,7 +185,7 @@ pub struct GrantCreated {
     pub owner: Address,
     pub title: String,
     pub total_amount: i128,
-    pub tags: Vec<String>,
+    pub tags: Vec<soroban_sdk::Symbol>,
     pub timestamp: u64,
 }
 
@@ -415,7 +415,7 @@ impl Events {
         owner: Address,
         title: String,
         total_amount: i128,
-        tags: Vec<String>,
+        tags: Vec<soroban_sdk::Symbol>,
     ) {
         let event = GrantCreated {
             event_version: EVENT_VERSION,

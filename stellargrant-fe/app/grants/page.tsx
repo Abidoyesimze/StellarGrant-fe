@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GrantCard } from "@/components/grants/GrantCard";
+import { apiGet } from "@/lib/api";
 
 /**
  * Grant Listing Page
@@ -68,38 +69,31 @@ export default function GrantsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
+
     const loadGrants = async () => {
       try {
         setLoading(true);
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
-        const response = await fetch(`${baseUrl}/grants`, {
-          signal: controller.signal,
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to load grants");
+        // apiGet unwraps the { data: [...] } envelope automatically
+        const raw = await apiGet<GrantListItem[]>("/grants");
+        if (!cancelled) {
+          setGrants((Array.isArray(raw) ? raw : []).map(normaliseGrant));
+          setError(null);
         }
-
-        const payload = await response.json();
-        const raw: GrantListItem[] = payload.data ?? [];
-        setGrants(raw.map(normaliseGrant));
-        setError(null);
       } catch (err) {
-        if (controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : "Failed to load grants");
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load grants");
+        }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
     };
 
     void loadGrants();
-    return () => controller.abort();
+    return () => { cancelled = true; };
   }, []);
-
 
   return (
     <div className="container mx-auto px-4 py-8">

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.3.0",
+    "axios": "^1.16.1",
     "dompurify": "^3.4.1",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",

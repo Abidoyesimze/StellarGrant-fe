@@ -8,12 +8,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import {
-  isConnected,
-  getPublicKey,
-  getNetwork,
-  signTransaction,
-} from "@stellar/freighter-api";
+import * as freighterApi from "@stellar/freighter-api";
 import { useWalletStore } from "@/lib/store/walletStore";
 import { networkPassphraseConfig } from "@/lib/stellar/client";
 
@@ -40,10 +35,10 @@ export function useWallet(): WalletState {
 
     async function restoreSession() {
       try {
-        const connected = await isConnected();
+        const connected = await freighterApi.isConnected();
         if (connected) {
-          const key = await getPublicKey();
-          const net = await getNetwork();
+          const key = await freighterApi.getPublicKey();
+          const net = await freighterApi.getNetwork();
           setAddress(key);
           setNetwork(net as "testnet" | "mainnet" | "futurenet");
           setWalletType("freighter");
@@ -66,8 +61,8 @@ export function useWallet(): WalletState {
           throw new Error("Freighter is only available in the browser");
         }
 
-        const key = await getPublicKey();
-        const net = await getNetwork();
+        const key = await freighterApi.getPublicKey();
+        const net = await freighterApi.getNetwork();
         setAddress(key);
         setNetwork(net as "testnet" | "mainnet" | "futurenet");
         setWalletType("freighter");
@@ -94,7 +89,7 @@ export function useWallet(): WalletState {
     }
 
     try {
-      const signedXdr = await signTransaction(xdr, {
+      const signedXdr = await freighterApi.signTransaction(xdr, {
         networkPassphrase: networkPassphraseConfig,
       });
       return signedXdr;

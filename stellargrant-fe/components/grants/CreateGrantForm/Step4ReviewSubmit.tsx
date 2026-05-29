@@ -72,7 +72,7 @@ export function Step4ReviewSubmit() {
         // execute returns null on failure or rejection
         // user transaction failed, showRetry inside modal/inline
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error during deployment formulation:", err);
     }
   };

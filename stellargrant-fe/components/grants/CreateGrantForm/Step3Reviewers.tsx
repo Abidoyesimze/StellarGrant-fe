@@ -104,8 +104,8 @@ export function Step3Reviewers() {
         })}
       </div>
 
-      {errors.reviewers && !Array.isArray(errors.reviewers) && (errors.reviewers as any).message && (
-        <p className="font-mono text-xs text-danger">{(errors.reviewers as any).message}</p>
+      {errors.reviewers && !Array.isArray(errors.reviewers) && (errors.reviewers as { message?: string }).message && (
+        <p className="font-mono text-xs text-danger">{(errors.reviewers as { message?: string }).message}</p>
       )}
 
       {/* Add Reviewer Button */}

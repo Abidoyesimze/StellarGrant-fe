@@ -4,7 +4,7 @@ import { CreateGrantForm } from "@/components/grants/CreateGrantForm";
 
 // 1. Mock useWalletStore
 vi.mock("@/lib/store", () => ({
-  useWalletStore: vi.fn((selector: (s: any) => any) =>
+  useWalletStore: vi.fn(<T,>(selector: (s: { address: string }) => T) =>
     selector({ address: "GBWALLET123456789012345678901234567890123456789012345678" })
   ),
 }));

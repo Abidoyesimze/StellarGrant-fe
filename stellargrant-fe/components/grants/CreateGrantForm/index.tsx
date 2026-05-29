@@ -76,7 +76,7 @@ export function CreateGrantForm() {
       clearTimeout(debounceRef.current);
     }
     debounceRef.current = setTimeout(() => {
-      saveDraft({ ...watchedValues, currentStep } as any);
+      saveDraft({ ...watchedValues, currentStep } as Partial<GrantFormData> & { currentStep?: number });
     }, 2000);
 
     return () => {

@@ -1,11 +1,17 @@
-import { DataSource, Repository } from "typeorm";
+import { DataSource, In, Repository } from "typeorm";
 import { Grant } from "../entities/Grant";
 import { Contributor } from "../entities/Contributor";
 import { ReputationLog } from "../entities/ReputationLog";
 import { Activity } from "../entities/Activity";
 import { UserWatchlist } from "../entities/UserWatchlist";
-import { SorobanContractClient } from "../soroban/types";
+import { Milestone } from "../entities/Milestone";
+import { SorobanContractClient, SorobanMilestone } from "../soroban/types";
 import { notificationService } from "./notification-service";
+import { metricsService } from "./metrics-service";
+import { GrantHistory } from "../entities/GrantHistory";
+import { computeDiff } from "../utils/diff";
+import { WebhookDispatcher } from "./webhook-dispatcher";
+import { WebhookEventType } from "../entities/WebhookSubscription";
 
 export class GrantSyncService {
   private readonly grantRepo: Repository<Grant>;
@@ -13,24 +19,50 @@ export class GrantSyncService {
   private readonly reputationLogRepo: Repository<ReputationLog>;
   private readonly activityRepo: Repository<Activity>;
   private readonly watchlistRepo: Repository<UserWatchlist>;
+  private readonly milestoneRepo: Repository<Milestone>;
+  private readonly grantHistoryRepo: Repository<GrantHistory>;
 
   constructor(
     private readonly dataSource: DataSource,
     private readonly sorobanClient: SorobanContractClient,
+    private readonly onInvalidatePublicCaches?: () => void | Promise<void>,
+    private readonly webhookDispatcher?: WebhookDispatcher,
   ) {
     this.grantRepo = this.dataSource.getRepository(Grant);
     this.contributorRepo = this.dataSource.getRepository(Contributor);
     this.reputationLogRepo = this.dataSource.getRepository(ReputationLog);
     this.activityRepo = this.dataSource.getRepository(Activity);
     this.watchlistRepo = this.dataSource.getRepository(UserWatchlist);
+    this.milestoneRepo = this.dataSource.getRepository(Milestone);
+    this.grantHistoryRepo = this.dataSource.getRepository(GrantHistory);
   }
 
   async syncAllGrants(): Promise<void> {
+    await this.onInvalidatePublicCaches?.();
     const grants = await this.sorobanClient.fetchGrants();
     for (const grant of grants) {
+      const { milestones, ...grantRecord } = grant;
       const existingGrant = await this.grantRepo.findOne({ where: { id: grant.id } });
-      await this.grantRepo.save(grant);
+      await this.grantRepo.save(grantRecord);
+      await this.syncMilestones(grant.id, milestones);
       await this.syncContributorScore(grant.recipient);
+
+      if (existingGrant) {
+        const diff = computeDiff(existingGrant, grantRecord);
+        if (Object.keys(diff).length > 0) {
+          await this.grantHistoryRepo.save({
+            grantId: grant.id,
+            snapshot: grantRecord,
+            diff,
+          });
+        }
+      } else {
+        await this.grantHistoryRepo.save({
+          grantId: grant.id,
+          snapshot: grantRecord,
+          diff: computeDiff({}, grantRecord),
+        });
+      }
 
       // Log activity for new grants
       if (!existingGrant) {
@@ -41,7 +73,14 @@ export class GrantSyncService {
           actorAddress: grant.recipient,
           data: { title: grant.title, totalAmount: grant.totalAmount },
         });
+        metricsService.incrementGrantCreated();
         notificationService.notifyUser(grant.recipient, "grant_created", { title: grant.title, grantId: grant.id });
+        this.webhookDispatcher?.dispatch(WebhookEventType.GRANT_CREATED, {
+          grantId: grant.id,
+          title: grant.title,
+          recipient: grant.recipient,
+          totalAmount: grant.totalAmount,
+        });
       } else if (existingGrant.status !== grant.status) {
         // Log activity for status changes
         await this.logActivity({
@@ -63,16 +102,43 @@ export class GrantSyncService {
           oldStatus: existingGrant.status,
           newStatus: grant.status,
         });
+        this.webhookDispatcher?.dispatch(WebhookEventType.GRANT_STATUS_CHANGED, {
+          grantId: grant.id,
+          title: grant.title,
+          recipient: grant.recipient,
+          oldStatus: existingGrant.status,
+          newStatus: grant.status,
+        });
       }
     }
   }
 
   async syncGrant(id: number): Promise<void> {
+    await this.onInvalidatePublicCaches?.();
     const grant = await this.sorobanClient.fetchGrantById(id);
     if (!grant) return;
+    const { milestones, ...grantRecord } = grant;
     const existingGrant = await this.grantRepo.findOne({ where: { id } });
-    await this.grantRepo.save(grant);
+    await this.grantRepo.save(grantRecord);
+    await this.syncMilestones(grant.id, milestones);
     await this.syncContributorScore(grant.recipient);
+
+    if (existingGrant) {
+      const diff = computeDiff(existingGrant, grantRecord);
+      if (Object.keys(diff).length > 0) {
+        await this.grantHistoryRepo.save({
+          grantId: grant.id,
+          snapshot: grantRecord,
+          diff,
+        });
+      }
+    } else {
+      await this.grantHistoryRepo.save({
+        grantId: grant.id,
+        snapshot: grantRecord,
+        diff: computeDiff({}, grantRecord),
+      });
+    }
 
     // Log activity for new grants
     if (!existingGrant) {
@@ -83,7 +149,14 @@ export class GrantSyncService {
         actorAddress: grant.recipient,
         data: { title: grant.title, totalAmount: grant.totalAmount },
       });
+      metricsService.incrementGrantCreated();
       notificationService.notifyUser(grant.recipient, "grant_created", { title: grant.title, grantId: grant.id });
+      this.webhookDispatcher?.dispatch(WebhookEventType.GRANT_CREATED, {
+        grantId: grant.id,
+        title: grant.title,
+        recipient: grant.recipient,
+        totalAmount: grant.totalAmount,
+      });
     } else if (existingGrant.status !== grant.status) {
       // Log activity for status changes
       await this.logActivity({
@@ -105,6 +178,13 @@ export class GrantSyncService {
         oldStatus: existingGrant.status,
         newStatus: grant.status,
       });
+      this.webhookDispatcher?.dispatch(WebhookEventType.GRANT_STATUS_CHANGED, {
+        grantId: grant.id,
+        title: grant.title,
+        recipient: grant.recipient,
+        oldStatus: existingGrant.status,
+        newStatus: grant.status,
+      });
     }
   }
 
@@ -112,6 +192,42 @@ export class GrantSyncService {
     const watchers = await this.watchlistRepo.find({ where: { grantId } });
     for (const watcher of watchers) {
       notificationService.notifyUser(watcher.address, type as any, data);
+    }
+  }
+
+  private async syncMilestones(grantId: number, milestones?: SorobanMilestone[]): Promise<void> {
+    if (!milestones) {
+      return;
+    }
+
+    const existing = await this.milestoneRepo.find({ where: { grantId } });
+    const existingByIdx = new Map(existing.map((milestone) => [milestone.idx, milestone]));
+    const nextIdxs = new Set<number>();
+
+    for (const milestone of milestones) {
+      nextIdxs.add(milestone.idx);
+      const previous = existingByIdx.get(milestone.idx);
+      const deadlineChanged = previous?.deadline !== milestone.deadline;
+
+      await this.milestoneRepo.save({
+        id: previous?.id,
+        grantId,
+        idx: milestone.idx,
+        title: milestone.title,
+        description: milestone.description ?? null,
+        deadline: milestone.deadline,
+        lastDeadlineReminderAt: deadlineChanged ? null : previous?.lastDeadlineReminderAt ?? null,
+        lastDeadlineReminderDaysBefore: deadlineChanged ? null : previous?.lastDeadlineReminderDaysBefore ?? null,
+        overdueNotifiedAt: deadlineChanged ? null : previous?.overdueNotifiedAt ?? null,
+      });
+    }
+
+    const staleIds = existing
+      .filter((milestone) => !nextIdxs.has(milestone.idx))
+      .map((milestone) => milestone.id);
+
+    if (staleIds.length > 0) {
+      await this.milestoneRepo.delete({ id: In(staleIds) });
     }
   }
 
@@ -150,6 +266,13 @@ export class GrantSyncService {
         entityId: null,
         actorAddress: address,
         data: { gain: score.reputation - oldReputation, newReputation: score.reputation },
+      });
+
+      this.webhookDispatcher?.dispatch(WebhookEventType.CONTRIBUTOR_REPUTATION_CHANGED, {
+        address,
+        oldReputation,
+        newReputation: score.reputation,
+        gain: score.reputation - oldReputation,
       });
     }
   }

@@ -1,7 +1,6 @@
 import { Column, Entity, Index, PrimaryColumn, UpdateDateColumn } from "typeorm";
 
 @Entity({ name: "contributors" })
-@Index("IDX_contributors_search", { synchronize: false, expression: "to_tsvector('english', address || ' ' || COALESCE(email, ''))" })
 export class Contributor {
   @PrimaryColumn({ type: "varchar", length: 120 })
   address!: string;
@@ -18,6 +17,21 @@ export class Contributor {
 
   @Column({ type: "varchar", length: 254, nullable: true })
   email!: string | null;
+
+  @Column({ type: "text", nullable: true })
+  bio!: string | null;
+
+  @Column({ type: "varchar", length: 2048, nullable: true })
+  profilePictureUrl!: string | null;
+
+  @Column({ type: "varchar", length: 2048, nullable: true })
+  githubUrl!: string | null;
+
+  @Column({ type: "varchar", length: 2048, nullable: true })
+  twitterUrl!: string | null;
+
+  @Column({ type: "varchar", length: 2048, nullable: true })
+  linkedinUrl!: string | null;
 
   @Column({ type: "boolean", default: true })
   emailNotifications!: boolean;

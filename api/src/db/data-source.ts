@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { DataSource } from "typeorm";
 import { env } from "../config/env";
 import { Grant } from "../entities/Grant";
+import { Milestone } from "../entities/Milestone";
 import { MilestoneProof } from "../entities/MilestoneProof";
 import { User } from "../entities/User";
 import { GrantReviewer } from "../entities/GrantReviewer";
@@ -14,8 +15,17 @@ import { Activity } from "../entities/Activity";
 
 import { GrantView } from "../entities/GrantView";
 import { ReconciliationCheckpoint } from "../entities/ReconciliationCheckpoint";
+import { RateLimitLog } from "../entities/RateLimitLog";
+import { Community } from "../entities/Community";
+import { MilestoneComment } from "../entities/MilestoneComment";
+import { GrantHistory } from "../entities/GrantHistory";
 import { FeeCollection } from "../entities/FeeCollection";
-
+import { PlatformConfig } from "../entities/PlatformConfig";
+import { Report } from "../entities/Report";
+import { WebhookSubscription } from "../entities/WebhookSubscription";
+import { WebhookDeliveryLog } from "../entities/WebhookDeliveryLog";
+import { Role } from "../entities/Role";
+import { UserRole } from "../entities/UserRole";
 
 export const buildDataSource = (databaseUrl = env.databaseUrl) =>
   new DataSource({
@@ -23,21 +33,7 @@ export const buildDataSource = (databaseUrl = env.databaseUrl) =>
     ...(databaseUrl.startsWith("sqljs")
       ? { location: databaseUrl.replace("sqljs://", ""), autoSave: false }
       : { url: databaseUrl }),
-    entities: [
-      Grant,
-      MilestoneProof,
-      User,
-      GrantReviewer,
-      MilestoneApproval,
-      Contributor,
-      ReputationLog,
-      AuditLog,
-      UserWatchlist,
-      Activity,
-      GrantView,
-      ReconciliationCheckpoint,
-      FeeCollection,
-    ],
+    entities: [Grant, Milestone, MilestoneProof, User, GrantReviewer, MilestoneApproval, Contributor, ReputationLog, AuditLog, UserWatchlist, Activity, GrantView, ReconciliationCheckpoint, RateLimitLog, Community, MilestoneComment, GrantHistory, FeeCollection, PlatformConfig, Report, WebhookSubscription, WebhookDeliveryLog, Role, UserRole],
     synchronize: true,
   });
 

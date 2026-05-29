@@ -105,6 +105,33 @@ export class ContractClient {
     // TODO: Implement contract method calls
     throw new Error("Not implemented");
   }
+
+  /**
+   * Write: Cast a vote on a milestone (approve or reject).
+   *
+   * Wraps milestoneApprove / future milestoneReject contract methods.
+   * The `approve` flag maps to the correct underlying call.
+   *
+   * @param grantId       - Grant ID string
+   * @param milestoneIdx  - Zero-based milestone index
+   * @param approve       - true → approve, false → reject
+   */
+  async voteOnMilestone(
+    grantId: string,
+    milestoneIdx: number,
+    approve: boolean
+  ): Promise<void> {
+    if (approve) {
+      await this.milestoneApprove({
+        grant_id: grantId,
+        milestone_idx: milestoneIdx,
+        reviewer: "",   // caller address injected at signing time
+      });
+    } else {
+      // TODO: wire to milestoneReject contract method once added
+      throw new Error("Milestone rejection not yet implemented in contract");
+    }
+  }
 }
 
 // Export singleton instance

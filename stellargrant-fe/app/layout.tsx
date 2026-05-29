@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Orbitron, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import { SocketProvider } from "@/hooks/useSocket";
-import { NotificationToast } from "@/components/ui/NotificationToast";
+import { Providers } from "./providers";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { AppFooter } from "@/components/layout/AppFooter";
 
 const orbitron = Orbitron({
   variable: "--font-orbitron",
@@ -17,8 +18,15 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StellarGrant Protocol",
+  title: {
+    default: "StellarGrant Protocol",
+    template: "%s | StellarGrant",
+  },
   description: "Decentralized milestone-based grant management on Stellar",
+  openGraph: {
+    siteName: "StellarGrant Protocol",
+    type: "website",
+  },
   other: {
     "theme-color": "#050A14",
   },
@@ -34,10 +42,13 @@ export default function RootLayout({
       <body
         className={`${orbitron.variable} ${ibmPlexMono.variable} antialiased`}
       >
-        <SocketProvider>
-          {children}
-          <NotificationToast />
-        </SocketProvider>
+        <Providers>
+          <AppHeader />
+          <main className="min-h-[calc(100vh-64px)] relative z-10">
+            {children}
+          </main>
+          <AppFooter />
+        </Providers>
       </body>
     </html>
   );

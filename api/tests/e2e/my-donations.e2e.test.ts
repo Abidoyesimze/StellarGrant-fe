@@ -7,6 +7,13 @@ import { FeeCollection } from "../../src/entities/FeeCollection";
 import { Grant } from "../../src/entities/Grant";
 import { MilestoneProof } from "../../src/entities/MilestoneProof";
 import { GrantReviewer } from "../../src/entities/GrantReviewer";
+import { Milestone } from "../../src/entities/Milestone";
+import { Contributor } from "../../src/entities/Contributor";
+import { User } from "../../src/entities/User";
+import { MilestoneApproval } from "../../src/entities/MilestoneApproval";
+import { Community } from "../../src/entities/Community";
+import { Role } from "../../src/entities/Role";
+import { UserRole } from "../../src/entities/UserRole";
 
 const TEST_ADDRESS = "GTESTFUNDERTOKEN123";
 const OTHER_ADDRESS = "GOTHERFUNDERTOKEN456";
@@ -69,7 +76,7 @@ describe("GET /my-donations", () => {
       type: "sqljs",
       location: "memory",
       autoSave: false,
-      entities: [Grant, FeeCollection, MilestoneProof, GrantReviewer],
+      entities: [Grant, Community, Milestone, FeeCollection, MilestoneProof, GrantReviewer, Contributor, User, MilestoneApproval, Role, UserRole],
       synchronize: true,
     };
     dataSource = new DataSource(options);
@@ -79,7 +86,9 @@ describe("GET /my-donations", () => {
   });
 
   afterAll(async () => {
-    await dataSource.destroy();
+    if (dataSource?.isInitialized) {
+      await dataSource.destroy();
+    }
   });
 
   it("returns all donations for the authenticated funder, grouped by token", async () => {
@@ -105,6 +114,7 @@ describe("GET /my-donations", () => {
 
   it("returns 401 if not authenticated", async () => {
     const res = await request(app).get("/my-donations").expect(401);
-    expect(res.body.error).toBe("Unauthorized");
+    expect(res.body.error).toBe(true);
+    expect(res.body.code).toBe("UNAUTHORIZED");
   });
 });

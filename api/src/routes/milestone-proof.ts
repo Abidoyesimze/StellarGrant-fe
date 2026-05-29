@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { Repository } from "typeorm";
-import { z } from "zod";
 import { MilestoneProof } from "../entities/MilestoneProof";
 import { Activity } from "../entities/Activity";
 import { SignatureService } from "../services/signature-service";
@@ -8,36 +7,26 @@ import { Grant } from "../entities/Grant";
 import { User } from "../entities/User";
 import * as emailService from "../services/email-service";
 import { notificationService } from "../services/notification-service";
-
-const milestoneProofSchema = z.object({
-  grantId: z.number().int().positive(),
-  milestoneIdx: z.number().int().nonnegative(),
-  proofCid: z.string().min(3).max(255),
-  description: z.string().optional(),
-  submittedBy: z.string().min(10).max(120),
-  signature: z.string().min(32),
-  nonce: z.string().min(8).max(80),
-  timestamp: z.number().int().positive(),
-});
+import { ResponseCacheService } from "../services/response-cache";
+import { WebhookDispatcher } from "../services/webhook-dispatcher";
+import { validateBody } from "../middlewares/validation-middleware";
+import { milestoneProofSchema } from "../schemas";
+import { WebhookEventType } from "../entities/WebhookSubscription";
 
 export const buildMilestoneProofRouter = (
   proofRepo: Repository<MilestoneProof>,
   signatureService: SignatureService,
+  responseCache: ResponseCacheService,
   grantRepo?: Repository<Grant>,
   userRepo?: Repository<User>,
+  webhookDispatcher?: WebhookDispatcher,
 ) => {
   const activityRepo = proofRepo.manager.getRepository(Activity);
   const router = Router();
 
-  router.post("/", async (req, res, next) => {
+  router.post("/", validateBody(milestoneProofSchema), async (req, res, next) => {
     try {
-      const parsed = milestoneProofSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({ error: "Invalid payload", details: parsed.error.issues });
-        return;
-      }
-
-      const payload = parsed.data;
+      const payload = (req as any).validatedBody;
       const maxSkewMs = 5 * 60 * 1000;
       if (Math.abs(Date.now() - payload.timestamp) > maxSkewMs) {
         res.status(400).json({ error: "Expired intent timestamp" });
@@ -95,11 +84,21 @@ export const buildMilestoneProofRouter = (
         }
       }
 
+      await responseCache.invalidateGrantsAndStats();
       // Broadcast to reviewers (simplified for now as broadcast)
       notificationService.broadcast("milestone_submitted", {
         grantId: payload.grantId,
         milestoneIdx: payload.milestoneIdx,
         submittedBy: payload.submittedBy
+      });
+
+      // Dispatch webhook event
+      webhookDispatcher?.dispatch(WebhookEventType.MILESTONE_SUBMITTED, {
+        grantId: payload.grantId,
+        milestoneIdx: payload.milestoneIdx,
+        proofId: proof.id,
+        proofCid: payload.proofCid,
+        submittedBy: payload.submittedBy,
       });
 
       res.status(201).json({ data: proof });

@@ -5,6 +5,8 @@
  * connected and (optionally) the connected address satisfies a required role.
  * While the wallet session is being restored, a shimmer placeholder is shown
  * so the "connect wallet" prompt never flashes before the session resolves.
+ * Wrapper component that renders children only when a wallet is connected.
+ * Shows a connect prompt otherwise.
  */
 
 "use client";
@@ -17,6 +19,8 @@ import { useGrant } from "@/hooks/useGrant";
 import { WalletConnect } from "@/components/wallet/WalletConnect";
 
 export type WalletGuardRole = "any" | "reviewer" | "contributor" | "owner";
+import { useWallet } from "@/hooks/useWallet";
+import { WalletConnect } from "./WalletConnect";
 
 interface WalletGuardProps {
   children: React.ReactNode;
@@ -71,6 +75,13 @@ function ConnectCard() {
         Connect your wallet to access this section.
       </p>
       <div className="mt-6 flex justify-center">
+export function WalletGuard({ children, requiredRole: _requiredRole = "any" }: WalletGuardProps) {
+  const { isConnected } = useWallet();
+
+  if (!isConnected) {
+    return (
+      <div className="wallet-guard-prompt">
+        <p className="wallet-guard-message">Please connect your wallet to continue</p>
         <WalletConnect />
       </div>
     </div>

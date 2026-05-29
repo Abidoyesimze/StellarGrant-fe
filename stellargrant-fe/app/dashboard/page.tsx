@@ -22,6 +22,7 @@ import { WalletConnect } from "@/components/wallet/WalletConnect";
 import { GrantCard, grantListVariants, grantCardVariants } from "@/components/grants/GrantCard";
 import { WatchedGrantsPanel } from "@/components/grants/WatchedGrantsPanel";
 import type { Grant } from "@/types";
+import { EmptyState, PageHeader } from "@/components/ui";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,13 +153,7 @@ function DashboardContent() {
   // ── Connected / watchlist ──────────────────────────────────────────────────
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl space-y-6">
-      {/* Header */}
-      <div>
-        <p className="font-mono text-xs uppercase tracking-[0.32em] text-accent-secondary">
-          Dashboard
-        </p>
-        <h1 className="mt-2 text-3xl font-bold">My Account</h1>
-      </div>
+      <PageHeader eyebrow="Dashboard" title="My Account" />
 
       {/* Wallet info card */}
       {address && (
@@ -232,21 +227,29 @@ function DashboardContent() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="rounded-[4px] border border-border-color bg-surface/60 p-10 text-center space-y-3"
               >
-                <p className="text-text-muted text-sm">
-                  {activeTab === "my-grants" && "You haven't created any grants yet."}
-                  {activeTab === "funding" && "You haven't funded any grants yet."}
-                  {activeTab === "reviewing" && "You have no grants assigned for review."}
-                </p>
-                {activeTab === "my-grants" && (
-                  <Link
-                    href="/grants/new"
-                    className="inline-block text-sm text-accent-primary hover:underline"
-                  >
-                    Create your first grant →
-                  </Link>
-                )}
+                <EmptyState
+                  title={
+                    activeTab === "my-grants"
+                      ? "No grants created"
+                      : activeTab === "funding"
+                        ? "No grants funded"
+                        : "No review assignments"
+                  }
+                  description={
+                    activeTab === "my-grants"
+                      ? "You haven't created any grants yet."
+                      : activeTab === "funding"
+                        ? "You haven't funded any grants yet."
+                        : "You have no grants assigned for review."
+                  }
+                  action={
+                    activeTab === "my-grants"
+                      ? { label: "Create your first grant", href: "/grants/new" }
+                      : undefined
+                  }
+                  size="sm"
+                />
               </motion.div>
             ) : (
               <motion.div

@@ -19,10 +19,6 @@ import { useGrant } from "@/hooks/useGrant";
 import { useFunders } from "@/hooks/useFunders";
 import type { TokenMetadata } from "@/types";
 
-interface GrantDetailClientProps {
-  grantId: string;
-}
-
 function daysUntilDeadline(deadlineTs: bigint): number {
   const ms = Number(deadlineTs) * 1000 - Date.now();
   return Math.ceil(ms / (1000 * 60 * 60 * 24));

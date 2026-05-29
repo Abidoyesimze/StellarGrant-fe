@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSocket } from "@/hooks/useSocket";
 import { useWalletStore } from "@/lib/store/walletStore";
 import type { ToastEventDetail } from "@/components/ui/NotificationToast";
@@ -151,6 +151,12 @@ export function useNotifications(): UseNotificationsResult {
   const { address } = useWalletStore();
   const { lastNotification } = useSocket();
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+
+  if (address !== hydratedFor) {
+    setHydratedFor(address);
+    setNotifications(address ? loadStored() : []);
+  }
 
   const updateList = useCallback((updater: (prev: Notification[]) => Notification[]) => {
     setNotifications((prev) => {
@@ -158,14 +164,6 @@ export function useNotifications(): UseNotificationsResult {
       if (address) saveStored(next);
       return next;
     });
-  }, [address]);
-
-  useEffect(() => {
-    if (!address) {
-      setNotifications([]);
-      return;
-    }
-    setNotifications(loadStored());
   }, [address]);
 
   useEffect(() => {
@@ -177,7 +175,10 @@ export function useNotifications(): UseNotificationsResult {
       lastNotification.payload,
       lastNotification.timestamp
     );
-    updateList((prev) => [item, ...prev.filter((n) => n.id !== item.id)]);
+    const timer = setTimeout(() => {
+      updateList((prev) => [item, ...prev.filter((n) => n.id !== item.id)]);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [lastNotification, address, updateList]);
 
   useEffect(() => {

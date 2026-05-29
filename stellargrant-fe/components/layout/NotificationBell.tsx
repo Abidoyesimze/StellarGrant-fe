@@ -22,10 +22,13 @@ export function NotificationBell() {
 
   useEffect(() => {
     if (unreadCount > prevUnreadRef.current && unreadCount > 0) {
-      setPulse(true);
-      const t = setTimeout(() => setPulse(false), 3000);
+      const startTimer = setTimeout(() => setPulse(true), 0);
+      const stopTimer = setTimeout(() => setPulse(false), 3000);
       prevUnreadRef.current = unreadCount;
-      return () => clearTimeout(t);
+      return () => {
+        clearTimeout(startTimer);
+        clearTimeout(stopTimer);
+      };
     }
     prevUnreadRef.current = unreadCount;
   }, [unreadCount]);

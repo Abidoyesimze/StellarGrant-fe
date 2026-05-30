@@ -42,6 +42,7 @@ import { buildUserRouter } from "./routes/users";
 import { buildGrantReviewerRouter } from "./routes/grant-reviewers";
 import { buildMilestoneApprovalNotifyRouter } from "./routes/milestone-approvals-notify";
 import { buildMilestoneCommentsRouter } from "./routes/milestone-comments";
+import { buildDisputesRouter, buildGrantDisputesRouter } from "./routes/disputes";
 
 export const createApp = (dataSource: DataSource, sorobanClient: SorobanContractClient) => {
   const app = express();
@@ -85,6 +86,8 @@ export const createApp = (dataSource: DataSource, sorobanClient: SorobanContract
   app.use("/users", buildUserRouter(userRepo));
   app.use("/grant_reviewers", buildGrantReviewerRouter(reviewerRepo));
   app.use("/milestone_approvals_notify", buildMilestoneApprovalNotifyRouter(approvalRepo, grantRepo, userRepo, webhookDispatcher));
+  app.use("/disputes", buildDisputesRouter(dataSource, rbacService, webhookDispatcher));
+  app.use("/", buildGrantDisputesRouter(dataSource));
   app.use("/", buildMilestoneCommentsRouter(milestoneRepo, commentsRepo, reviewerRepo));
   app.get("/metrics", async (req, res, next) => {
     try {

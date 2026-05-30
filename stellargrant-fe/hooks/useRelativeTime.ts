@@ -38,13 +38,9 @@ export function useRelativeTime(timestamp: TimestampInput): string {
   });
 
   useEffect(() => {
-    const d = toDate(timestamp);
-    if (!d) {
-      setLabel("");
-      return;
-    }
-    const tick = () => setLabel(formatRelative(d));
-    tick();
+    const target = new Date(date);
+    const tick = () => setLabel(formatRelative(target));
+    queueMicrotask(tick);
     const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
   }, [timestamp]);

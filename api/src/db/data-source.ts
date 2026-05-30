@@ -12,7 +12,6 @@ import { ReputationLog } from "../entities/ReputationLog";
 import { AuditLog } from "../entities/AuditLog";
 import { UserWatchlist } from "../entities/UserWatchlist";
 import { Activity } from "../entities/Activity";
-
 import { GrantView } from "../entities/GrantView";
 import { ReconciliationCheckpoint } from "../entities/ReconciliationCheckpoint";
 import { RateLimitLog } from "../entities/RateLimitLog";
@@ -33,9 +32,31 @@ export const buildDataSource = (databaseUrl = env.databaseUrl) =>
     ...(databaseUrl.startsWith("sqljs")
       ? { location: databaseUrl.replace("sqljs://", ""), autoSave: false }
       : { url: databaseUrl }),
-    entities: [Grant, Milestone, MilestoneProof, User, GrantReviewer, MilestoneApproval, Contributor, ReputationLog, AuditLog, UserWatchlist, Activity, GrantView, ReconciliationCheckpoint, RateLimitLog, Community, MilestoneComment, GrantHistory, FeeCollection, PlatformConfig, Report, WebhookSubscription, WebhookDeliveryLog, Role, UserRole],
+    entities: [
+      Grant,
+      Milestone,
+      MilestoneProof,
+      User,
+      GrantReviewer,
+      MilestoneApproval,
+      Contributor,
+      ReputationLog,
+      AuditLog,
+      UserWatchlist,
+      Activity,
+      GrantView,
+      ReconciliationCheckpoint,
+      RateLimitLog,
+      Community,
+      MilestoneComment,
+      GrantHistory,
+      FeeCollection,
+      PlatformConfig,
+      Report,
+      WebhookSubscription,
+      WebhookDeliveryLog,
+      Role,
+      UserRole,
+    ],
     synchronize: true,
   });
-
-// Export a singleton AppDataSource for use in routes/services
-export const AppDataSource = buildDataSource();

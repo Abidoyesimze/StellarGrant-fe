@@ -23,7 +23,7 @@
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.8.0",
     "marked": "^18.0.2",
-    "next": "16.1.6",
+    "next": "16.2.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hook-form": "^7.76.1",
@@ -33,7 +33,7 @@
     "zustand": "^5.0.3"
   },
   "optionalDependencies": {
-    "@next/swc-linux-x64-gnu": "16.1.6",
+    "@next/swc-linux-x64-gnu": "16.2.6",
     "lightningcss-linux-x64-gnu": "^1.31.1"
   },
   "devDependencies": {
@@ -52,7 +52,7 @@
     "@types/socket.io-client": "^1.4.36",
     "@vitejs/plugin-react": "^6.0.2",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "16.2.6",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "typescript": "^5",

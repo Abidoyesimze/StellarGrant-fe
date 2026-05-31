@@ -51,7 +51,7 @@ export class StellarGrantsSDK {
    */
   async grantCreate(
     input: GrantCreateInput,
-    options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string },
+    options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string; footprint?: any },
   ): Promise<unknown> {
     return this.invokeWrite(
       "grant_create",
@@ -70,7 +70,7 @@ export class StellarGrantsSDK {
   /**
    * Funds an existing grant.
    */
-  async grantFund(input: GrantFundInput, options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string }): Promise<unknown> {
+  async grantFund(input: GrantFundInput, options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string; footprint?: any }): Promise<unknown> {
     return this.invokeWrite(
       "grant_fund",
       [
@@ -432,13 +432,32 @@ export class StellarGrantsSDK {
     }
   }
 
-  private async invokeWrite(method: string, args: xdr.ScVal[], options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string }): Promise<unknown> {
+  private async invokeWrite(
+    method: string,
+    args: xdr.ScVal[],
+    options?: {
+      feePriority?: "low" | "medium" | "high";
+      simulatedFee?: string;
+      /** Pre-computed footprint from a prior {@link simulateFootprint} call. See issue #462. */
+      footprint?: any;
+    },
+  ): Promise<unknown> {
     try {
       const tx = await this.buildTx(method, args, options);
       const simulation = await this.server.simulateTransaction(tx);
       this.ensureSimulationSuccess(simulation);
 
-      const prepared = await this.server.prepareTransaction(tx);
+      // #458 — apply the simulation's minResourceFee when the caller has not
+      // supplied an explicit fee so every write goes out with an accurate fee.
+      const estimatedFee = simulation?.minResourceFee
+        ? this.applyFeePriority(BigInt(simulation.minResourceFee), options?.feePriority)
+        : undefined;
+
+      const txForSending = estimatedFee
+        ? await this.buildTx(method, args, { ...options, simulatedFee: estimatedFee.toString() })
+        : tx;
+
+      const prepared = await this.server.prepareTransaction(txForSending);
       if (!this.config.signer) {
         throw new Error("A signer is required for write operations.");
       }
@@ -459,7 +478,52 @@ export class StellarGrantsSDK {
     }
   }
 
-  private async buildTx(method: string, args: xdr.ScVal[], options?: { feePriority?: "low" | "medium" | "high"; simulatedFee?: string }): Promise<any> {
+  /**
+   * Simulate a transaction and return the ledger entry footprint for caching.
+   *
+   * Advanced callers can pass the returned footprint back via `options.footprint`
+   * on subsequent write calls to skip redundant simulation round-trips for
+   * repeated read-only access patterns. See [issue #462](https://github.com/StellarGrant/StellarGrant-fe/issues/462).
+   *
+   * @example
+   * ```ts
+   * const footprint = await sdk.simulateFootprint("grant_read", [grantIdVal]);
+   * // Reuse across multiple calls without simulating each time:
+   * await sdk.grantCreate(input, { footprint });
+   * ```
+   */
+  async simulateFootprint(method: string, args: xdr.ScVal[]): Promise<any> {
+    try {
+      const tx = await this.buildTx(method, args);
+      const simulation = await this.server.simulateTransaction(tx);
+      this.ensureSimulationSuccess(simulation);
+      return simulation?.transactionData ?? simulation?.footprint ?? null;
+    } catch (error) {
+      throw parseSorobanError(error);
+    }
+  }
+
+  private applyFeePriority(
+    base: bigint,
+    priority?: "low" | "medium" | "high",
+  ): bigint {
+    switch (priority) {
+      case "low":    return (base * BigInt(16)) / BigInt(10);
+      case "high":   return (base * BigInt(35)) / BigInt(10);
+      case "medium":
+      default:       return (base * BigInt(25)) / BigInt(10);
+    }
+  }
+
+  private async buildTx(
+    method: string,
+    args: xdr.ScVal[],
+    options?: {
+      feePriority?: "low" | "medium" | "high";
+      simulatedFee?: string;
+      footprint?: any;
+    },
+  ): Promise<any> {
     const signer = this.config.signer;
     if (!signer) {
       throw new Error("A signer is required to build a transaction.");
@@ -469,13 +533,19 @@ export class StellarGrantsSDK {
     const account = await this.server.getAccount(source);
     const fee = options?.simulatedFee ?? this.config.defaultFee ?? "100";
 
-    return new TransactionBuilder(account, {
+    let builder = new TransactionBuilder(account, {
       fee,
       networkPassphrase: this.config.networkPassphrase,
     })
       .addOperation(this.contract.call(method, ...args))
-      .setTimeout(60)
-      .build();
+      .setTimeout(60);
+
+    // #462 — attach pre-computed footprint when provided
+    if (options?.footprint) {
+      builder = (builder as any).setSorobanData(options.footprint) ?? builder;
+    }
+
+    return builder.build();
   }
 
   private ensureSimulationSuccess(simulation: any) {

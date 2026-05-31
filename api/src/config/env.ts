@@ -16,4 +16,6 @@ export const env = {
   rpcUrl: process.env.RPC_URL ?? "https://rpc-futurenet.stellar.org",
   networkPassphrase: process.env.NETWORK_PASSPHRASE ?? "Test SDF Network ; September 2015",
   redisUrl: process.env.REDIS_URL ?? "",
+  pinataJwt: process.env.PINATA_JWT ?? "",
+  ipfsGateway: process.env.PINATA_GATEWAY ?? "https://gateway.pinata.cloud",
 };

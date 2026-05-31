@@ -4,18 +4,20 @@
  * Ordered list of milestones with status indicators.
  * Displays token and payout amount for each milestone.
  * Clicking a milestone navigates to its detail page.
+ * Uses design-system tokens exclusively — no generic Tailwind colours.
  */
 
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { formatTokenAmount, getTokenMetadata, TokenMetadata } from "@/lib/tokens";
 import { Milestone as MilestoneType } from "@/types";
 
 interface MilestoneListProps {
   milestones: MilestoneType[];
   grantId: string;
-  grantToken?: string; // Fallback token if milestone doesn't specify one
+  grantToken?: string;
 }
 
 interface _MilestoneDisplay extends MilestoneType {
@@ -24,11 +26,19 @@ interface _MilestoneDisplay extends MilestoneType {
   amountFormatted: string;
 }
 
-export function MilestoneList({ milestones, grantId: _grantId, grantToken }: MilestoneListProps) {
+const STATUS_CLASSES: Record<string, string> = {
+  Paid: "border border-success/40 text-success",
+  Approved: "border border-accent-secondary/40 text-accent-secondary",
+  Submitted: "border border-warning/40 text-warning",
+  Overdue: "border border-danger/40 text-danger",
+  "Due Soon": "border border-warning/40 text-warning",
+  Pending: "border border-text-muted/40 text-text-muted",
+};
+
+export function MilestoneList({ milestones, grantId, grantToken }: MilestoneListProps) {
   const [tokenMetadataMap, setTokenMetadataMap] = useState<Map<string, TokenMetadata>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
 
-  // Collect all unique tokens from milestones
   const uniqueTokens = Array.from(
     new Set(
       milestones
@@ -37,21 +47,17 @@ export function MilestoneList({ milestones, grantId: _grantId, grantToken }: Mil
     )
   );
 
-  // Fetch metadata for all tokens
   useEffect(() => {
     async function fetchMetadata() {
       setIsLoading(true);
       const metadataMap = new Map<string, TokenMetadata>();
-
       for (const token of uniqueTokens) {
         const metadata = await getTokenMetadata(token);
         metadataMap.set(token, metadata);
       }
-
       setTokenMetadataMap(metadataMap);
       setIsLoading(false);
     }
-
     fetchMetadata();
   }, [uniqueTokens]);
 
@@ -64,43 +70,24 @@ export function MilestoneList({ milestones, grantId: _grantId, grantToken }: Mil
     return "Pending";
   };
 
-  const getStatusColor = (status: string): string => {
-    switch (status) {
-      case "Paid":
-        return "bg-green-100 text-green-800";
-      case "Approved":
-        return "bg-blue-100 text-blue-800";
-      case "Submitted":
-        return "bg-yellow-100 text-yellow-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
   const formatMilestoneAmount = (milestone: MilestoneType): string => {
     const token = milestone.token || grantToken;
-    if (!token || milestone.amount === undefined || milestone.amount === null) {
-      return "";
-    }
-
+    if (!token || milestone.amount === undefined || milestone.amount === null) return "";
     const metadata = tokenMetadataMap.get(token);
     const decimals = metadata?.decimals ?? 7;
     const symbol = metadata?.symbol ?? "UNKNOWN";
-
     return formatTokenAmount(milestone.amount, decimals, { symbol, showSymbol: true });
   };
 
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="animate-pulse space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="border rounded p-4 bg-gray-50">
-              <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-              <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-            </div>
-          ))}
-        </div>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="border border-border-color rounded-none p-4 bg-bg-secondary">
+            <div className="shimmer rounded-none h-4 w-3/4 mb-2" />
+            <div className="shimmer rounded-none h-3 w-1/2" />
+          </div>
+        ))}
       </div>
     );
   }
@@ -109,36 +96,35 @@ export function MilestoneList({ milestones, grantId: _grantId, grantToken }: Mil
     <div className="space-y-4">
       {milestones.map((milestone) => {
         const statusLabel = getMilestoneStatus(milestone);
-        const statusColor = getStatusColor(statusLabel);
+        const statusClasses = STATUS_CLASSES[statusLabel] ?? STATUS_CLASSES.Pending;
         const amountFormatted = formatMilestoneAmount(milestone);
 
         return (
-          <div
+          <Link
             key={milestone.idx}
-            className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white"
+            href={`/grants/${grantId}/milestones/${milestone.idx}`}
+            className="block border border-border-color rounded-none p-4 hover:border-accent-secondary/50 transition-colors bg-surface"
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
-                  <span className="text-sm font-mono text-gray-500">
-                    #{milestone.idx}
-                  </span>
-                  <h4 className="font-semibold text-lg">{milestone.title}</h4>
+                  <span className="text-sm font-mono text-text-muted">#{milestone.idx}</span>
+                  <h4 className="font-orbitron font-semibold text-lg">{milestone.title}</h4>
                 </div>
-                <p className="text-sm text-gray-600 mb-3">{milestone.description}</p>
+                <p className="text-sm text-text-muted mb-3">{milestone.description}</p>
                 <div className="flex items-center gap-4 text-sm">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>
+                  <span
+                    className={`inline-flex items-center px-2 py-0.5 rounded-none font-mono uppercase tracking-widest text-xs ${statusClasses}`}
+                  >
                     {statusLabel}
                   </span>
                   {amountFormatted && (
-                    <span className="text-gray-700 font-medium">
-                      Payout: {amountFormatted}
-                    </span>
+                    <span className="font-medium">Payout: {amountFormatted}</span>
                   )}
                 </div>
               </div>
             </div>
-          </div>
+          </Link>
         );
       })}
     </div>

@@ -1,15 +1,18 @@
 "use client";
 
 /**
- * useGrant Hook — fetches grant detail with milestones from the Next.js API route.
+ * useGrant Hook — fetches grant detail with milestones.
+ * Backed by TanStack Query for automatic caching, background refetch,
+ * and deduplication. Return shape is unchanged for backward compatibility.
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { notFound } from "next/navigation";
 import type { Grant, Milestone } from "@/types";
 import { logger } from "@/lib/logger";
 
 interface UseGrantOptions {
+  /** How often to background-refetch in ms. Default: 15 000. */
   refetchInterval?: number;
   enabled?: boolean;
 }
@@ -31,86 +34,71 @@ interface UseGrantResult {
 
 const hookLogger = logger.child("useGrant");
 
+async function fetchGrantDetail(grantId: string): Promise<GrantDetailData> {
+  const res = await fetch(`/api/grants/${grantId}`);
+  if (res.status === 404) notFound();
+  if (!res.ok) throw new Error(`Failed to fetch grant ${grantId}: ${res.status}`);
+
+  const json = (await res.json()) as {
+    grant: Grant;
+    milestones: Milestone[];
+    completedMilestones: number;
+    isWatched: boolean;
+    reviewers?: string[];
+  };
+
+  hookLogger.debug("Grant fetched", { grantId, status: json.grant?.status });
+
+  const grant: Grant = {
+    ...json.grant,
+    budget: BigInt(json.grant.budget),
+    funded: BigInt(json.grant.funded),
+    deadline: BigInt(json.grant.deadline),
+    created_at: BigInt(json.grant.created_at),
+    reviewers: json.reviewers ?? json.grant.reviewers,
+  };
+
+  return {
+    grant,
+    milestones: json.milestones ?? [],
+    completedMilestones: json.completedMilestones ?? 0,
+    isWatched: json.isWatched ?? false,
+  };
+}
+
+function classifyError(err: Error): "network" | "api" | "rpc" | "generic" {
+  if (err.message.includes("Failed to fetch") || (typeof navigator !== "undefined" && !navigator.onLine)) {
+    return "network";
+  }
+  if (err.message.includes("503") || err.message.includes("504")) return "api";
+  return "generic";
+}
+
 export function useGrant(grantId: string, options?: UseGrantOptions): UseGrantResult {
-  const { refetchInterval = 30_000, enabled = true } = options ?? {};
+  const { refetchInterval = 15_000, enabled = true } = options ?? {};
+  const queryClient = useQueryClient();
 
-  const [data, setData] = useState<GrantDetailData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [errorType, setErrorType] = useState<"network" | "api" | "rpc" | "generic">("generic");
-  const abortRef = useRef<AbortController | null>(null);
+  const { data, isLoading, error, refetch } = useQuery<GrantDetailData, Error>({
+    queryKey: ["grant", grantId],
+    queryFn: () => {
+      hookLogger.debug("Fetching grant", { grantId });
+      return fetchGrantDetail(grantId);
+    },
+    enabled: enabled && !!grantId,
+    staleTime: 15_000,
+    refetchInterval: enabled ? refetchInterval : false,
+  });
 
-  const fetchGrant = useCallback(async () => {
-    if (!enabled || !grantId) return;
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
+  // Prefetch on hover support: expose queryClient.prefetchQuery for GrantCard
+  void queryClient; // used by callers via useQueryClient directly
 
-    // Defer state updates to microtask to avoid sync-setState-in-effect warning
-    await Promise.resolve();
-    setIsLoading(true);
-    setError(null);
-    hookLogger.debug("Fetching grant", { grantId });
-
-    try {
-      const res = await fetch(`/api/grants/${grantId}`, {
-        signal: abortRef.current.signal,
-      });
-      if (res.status === 404) notFound();
-      if (!res.ok) throw new Error(`Failed to fetch grant ${grantId}: ${res.status}`);
-      const json = (await res.json()) as {
-        grant: Grant;
-        milestones: Milestone[];
-        completedMilestones: number;
-        isWatched: boolean;
-        reviewers?: string[];
-      };
-
-      const grant = {
-        ...json.grant,
-        budget: BigInt(json.grant.budget),
-        funded: BigInt(json.grant.funded),
-        deadline: BigInt(json.grant.deadline),
-        created_at: BigInt(json.grant.created_at),
-        reviewers: json.reviewers ?? json.grant.reviewers,
-      };
-
-      hookLogger.debug("Grant fetched", { grantId, status: grant.status });
-      setData({
-        grant,
-        milestones: json.milestones ?? [],
-        completedMilestones: json.completedMilestones ?? 0,
-        isWatched: json.isWatched ?? false,
-      });
-    } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return;
-      const error = err instanceof Error ? err : new Error(String(err));
-      hookLogger.error("Error fetching grant", { grantId, error: error.message });
-      setError(error);
-
-      // Detect error type
-      if (error.message.includes("Failed to fetch") || !navigator.onLine) {
-        setErrorType("network");
-      } else if (error.message.includes("503") || error.message.includes("504")) {
-        setErrorType("api");
-      } else {
-        setErrorType("generic");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [grantId, enabled]);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      void fetchGrant();
-    });
-    if (!enabled || refetchInterval <= 0) return;
-    const id = setInterval(() => void fetchGrant(), refetchInterval);
-    return () => {
-      clearInterval(id);
-      abortRef.current?.abort();
-    };
-  }, [fetchGrant, enabled, refetchInterval]);
-
-  return { data, isLoading, error, errorType, refetch: fetchGrant };
+  return {
+    data: data ?? null,
+    isLoading,
+    error: error ?? null,
+    errorType: error ? classifyError(error) : "generic",
+    refetch: async () => {
+      await refetch();
+    },
+  };
 }

@@ -1,6 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+/**
+ * useReputation Hook
+ *
+ * Fetches contributor reputation from both the Soroban contract and the
+ * indexing API, preferring API data when available.
+ * Backed by TanStack Query (stale time: 2 min).
+ * Return shape is unchanged for backward compatibility.
+ */
+
+import { useQuery } from "@tanstack/react-query";
 import { contractClient } from "@/lib/stellar/contract";
 import { api } from "@/lib/api";
 
@@ -19,101 +28,49 @@ interface ReputationData {
   totalEarned: bigint;
 }
 
-const cache = new Map<
-  string,
-  { data: ReputationData; timestamp: number }
->();
-const CACHE_TTL = 60_000;
+async function fetchReputation(address: string): Promise<ReputationData> {
+  const [contributorResult, apiResult] = await Promise.allSettled([
+    contractClient.contributorScore({ address }),
+    api.get(`/contributors/${address}`),
+  ]);
+
+  if (contributorResult.status === "rejected" && apiResult.status === "rejected") {
+    throw new Error("Failed to fetch reputation from all sources");
+  }
+
+  let score: number | null = null;
+  let grantsCompleted = 0;
+  let totalEarned = BigInt(0);
+
+  if (contributorResult.status === "fulfilled") {
+    score = Number(contributorResult.value);
+  }
+
+  if (apiResult.status === "fulfilled") {
+    score = apiResult.value.data.reputation ?? score;
+    grantsCompleted = apiResult.value.data.grants_participated ?? 0;
+    totalEarned = BigInt(apiResult.value.data.total_earned ?? 0);
+  }
+
+  return { score, grantsCompleted, totalEarned };
+}
 
 export function useReputation(address: string | null): UseReputationResult {
-  const [score, setScore] = useState<number | null>(null);
-  const [grantsCompleted, setGrantsCompleted] = useState(0);
-  const [totalEarned, setTotalEarned] = useState<bigint>(BigInt(0));
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const fetch = useCallback(async () => {
-    if (!address) {
-      setScore(null);
-      setGrantsCompleted(0);
-      setTotalEarned(BigInt(0));
-      setIsLoading(false);
-      setError(null);
-      return;
-    }
-
-    const cached = cache.get(address);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      setScore(cached.data.score);
-      setGrantsCompleted(cached.data.grantsCompleted);
-      setTotalEarned(cached.data.totalEarned);
-      setIsLoading(false);
-      return;
-    }
-
-    queueMicrotask(() => setIsLoading(true));
-    queueMicrotask(() => setError(null));
-
-    await Promise.resolve();
-    try {
-      const [contributorResult, apiResult] = await Promise.allSettled([
-        contractClient.contributorScore({ address }),
-        api.get(`/contributors/${address}`),
-      ]);
-
-      let finalScore: number | null = null;
-      let finalGrants = 0;
-      let finalEarned = BigInt(0);
-
-      if (contributorResult.status === "fulfilled") {
-        finalScore = Number(contributorResult.value);
-      }
-
-      if (apiResult.status === "fulfilled") {
-        finalScore = apiResult.value.data.reputation ?? finalScore;
-        finalGrants = apiResult.value.data.grants_participated ?? 0;
-        finalEarned = BigInt(apiResult.value.data.total_earned ?? 0);
-      }
-
-      if (
-        contributorResult.status === "rejected" &&
-        apiResult.status === "rejected"
-      ) {
-        throw new Error("Failed to fetch reputation from all sources");
-      }
-
-      cache.set(address, {
-        data: {
-          score: finalScore,
-          grantsCompleted: finalGrants,
-          totalEarned: finalEarned,
-        },
-        timestamp: Date.now(),
-      });
-
-      setScore(finalScore);
-      setGrantsCompleted(finalGrants);
-      setTotalEarned(finalEarned);
-    } catch (err) {
-      const e = err instanceof Error ? err : new Error("Unknown error");
-      setError(e);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [address]);
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      fetch();
-    });
-  }, [fetch]);
+  const { data, isLoading, error, refetch } = useQuery<ReputationData, Error>({
+    queryKey: ["reputation", address],
+    queryFn: () => fetchReputation(address!),
+    enabled: !!address,
+    staleTime: 2 * 60_000, // 2 minutes
+  });
 
   return {
-    score,
-    grantsCompleted,
-    totalEarned,
+    score: data?.score ?? null,
+    grantsCompleted: data?.grantsCompleted ?? 0,
+    totalEarned: data?.totalEarned ?? BigInt(0),
     isLoading,
-    error,
-    refetch: fetch,
+    error: error ?? null,
+    refetch: async () => {
+      await refetch();
+    },
   };
 }

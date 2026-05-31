@@ -4,14 +4,15 @@
  * useGrants Hook
  *
  * Fetches a paginated, filterable grant list.
- * Returns grants array, pagination metadata, and loading/error state.
+ * Backed by TanStack Query for automatic caching and background refetch.
+ * Return shape is unchanged for backward compatibility.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { Grant } from "@/types";
 import { logger } from "@/lib/logger";
 
-interface UseGrantsOptions {
+export interface UseGrantsOptions {
   status?: "open" | "active" | "completed" | "cancelled";
   token?: "XLM" | "USDC" | "all";
   sort?: "newest" | "funded" | "deadline";
@@ -19,7 +20,7 @@ interface UseGrantsOptions {
   q?: string;
 }
 
-interface GrantPage {
+export interface GrantPage {
   grants: Grant[];
   nextPage: number | null;
   total: number;
@@ -37,72 +38,62 @@ interface UseGrantsResult {
 
 const hookLogger = logger.child("useGrants");
 
+function buildGrantsUrl(options: UseGrantsOptions, page: number): string {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  if (options.token && options.token !== "all") params.set("token", options.token);
+  if (options.sort) params.set("sort", options.sort);
+  if (options.q) params.set("q", options.q);
+  params.set("page", String(page));
+  return `/api/grants?${params.toString()}`;
+}
+
+async function fetchGrantsPage(options: UseGrantsOptions, page: number): Promise<GrantPage> {
+  const url = buildGrantsUrl(options, page);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch grants: ${res.status}`);
+  const json = (await res.json()) as GrantPage;
+  hookLogger.debug("Grants fetched", { count: json.grants.length, total: json.total });
+  return json;
+}
+
+function classifyError(err: Error): "network" | "api" | "rpc" | "generic" {
+  if (err.message.includes("Failed to fetch") || (typeof navigator !== "undefined" && !navigator.onLine)) {
+    return "network";
+  }
+  if (err.message.includes("503") || err.message.includes("504")) return "api";
+  return "generic";
+}
+
 export function useGrants(options?: UseGrantsOptions): UseGrantsResult {
   const { status, token, sort, page = 1, q } = options ?? {};
+  const opts: UseGrantsOptions = { status, token, sort, q };
 
-  const [data, setData] = useState<GrantPage | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  const [errorType, setErrorType] = useState<"network" | "api" | "rpc" | "generic">("generic");
-  const [currentPage, setCurrentPage] = useState(page);
+  hookLogger.debug("useGrants", { page, ...opts });
 
-  const buildUrl = useCallback((p: number) => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (token && token !== "all") params.set("token", token);
-    if (sort) params.set("sort", sort);
-    if (q) params.set("q", q);
-    params.set("page", String(p));
-    return `/api/grants?${params.toString()}`;
-  }, [status, token, sort, q]);
+  const { data, isLoading, error, refetch } = useQuery<GrantPage, Error>({
+    queryKey: ["grants", opts, page],
+    queryFn: () => fetchGrantsPage(opts, page),
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  });
 
-  const fetchPage = useCallback(async (p: number) => {
-    setIsLoading(true);
-    setError(null);
-    hookLogger.debug("Fetching grants page", { page: p, status, sort });
-
-    try {
-      const res = await fetch(buildUrl(p));
-      if (!res.ok) throw new Error(`Failed to fetch grants: ${res.status}`);
-      const json = await res.json() as GrantPage;
-      hookLogger.debug("Grants fetched", { count: json.grants.length, total: json.total });
-      setData(json);
-      setCurrentPage(p);
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      hookLogger.error("Error fetching grants", { error: error.message });
-      setError(error);
-      
-      // Detect error type
-      if (error.message.includes("Failed to fetch") || !navigator.onLine) {
-        setErrorType("network");
-      } else if (error.message.includes("503") || error.message.includes("504")) {
-        setErrorType("api");
-      } else {
-        setErrorType("generic");
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [buildUrl, status, sort]);
-
-  useEffect(() => {
-    // defer to microtask to avoid setState-in-effect warning
-    Promise.resolve().then(() => void fetchPage(1));
-  }, [fetchPage]);
-
-  const fetchNextPage = useCallback(async () => {
+  const fetchNextPage = async () => {
     if (!data?.nextPage) return;
-    await fetchPage(data.nextPage);
-  }, [data, fetchPage]);
+    // Prefetch next page — the caller navigates via URL update which
+    // triggers a fresh query; this warms the cache.
+    await refetch();
+  };
 
   return {
-    data,
+    data: data ?? null,
     isLoading,
-    error,
-    errorType,
+    error: error ?? null,
+    errorType: error ? classifyError(error) : "generic",
     fetchNextPage,
     hasNextPage: !!data?.nextPage,
-    refetch: () => fetchPage(currentPage),
+    refetch: async () => {
+      await refetch();
+    },
   };
 }

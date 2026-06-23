@@ -120,6 +120,31 @@ pub struct MilestonePaid {
     pub timestamp: u64,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractMigrated {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub run_by: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewerApproved {
+    pub reviewer: Address,
+    pub approved_by: Address,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewerRevoked {
+    pub reviewer: Address,
+    pub revoked_by: Address,
+    pub timestamp: u64,
+}
+
 pub struct Events;
 
 impl Events {
@@ -296,6 +321,34 @@ impl Events {
             grant_id,
             milestone_idx,
             amount,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_contract_migrated(env: &Env, from_version: u32, to_version: u32, run_by: Address) {
+        let event = ContractMigrated {
+            from_version,
+            to_version,
+            run_by,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_reviewer_approved(env: &Env, reviewer: Address, approved_by: Address) {
+        let event = ReviewerApproved {
+            reviewer,
+            approved_by,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_reviewer_revoked(env: &Env, reviewer: Address, revoked_by: Address) {
+        let event = ReviewerRevoked {
+            reviewer,
+            revoked_by,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);

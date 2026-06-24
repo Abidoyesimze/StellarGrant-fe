@@ -35,6 +35,20 @@ pub const REPUTATION_REJECTION_PENALTY: u32 = 200; // bps subtracted per rejecti
 pub const MAX_MILESTONES_PER_GRANT: u32 = 20;
 pub const MAX_BATCH_SIZE: u32 = 10;
 
+// ── Streaming (#531) ─────────────────────────────────────────────────────────
+pub const MAX_STREAM_DURATION_LEDGERS: u32 = 1_000_000;
+pub const MIN_STREAM_RATE: i128 = 1;
+
+// ── Quadratic Voting (#537) ──────────────────────────────────────────────────
+pub const DEFAULT_VOICE_CREDITS: u32 = 100;
+
+// ── Insurance (#538) ─────────────────────────────────────────────────────────
+pub const DEFAULT_INSURANCE_PREMIUM_RATE_BPS: u32 = 50; // 0.5%
+pub const DEFAULT_INSURANCE_DURATION_LEDGERS: u32 = 1_000_000;
+
+// ── Hooks (#539) ─────────────────────────────────────────────────────────────
+pub const MAX_HOOKS_PER_EVENT: u32 = 5;
+
 #[cfg(test)]
 mod tests {
     use super::*;

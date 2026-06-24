@@ -26,5 +26,27 @@ pub enum ContractError {
     BatchEmpty = 19,
     BatchTooLarge = 20,
     MilestoneAlreadySubmitted = 21,
+    ZeroAmount = 22,
+    ReviewerLimitExceeded = 23,
+    MilestoneIndexOutOfBounds = 24,
     ContractPaused = 26,
+    // Streaming (#531)
+    StreamNotFound = 27,
+    StreamNotActive = 28,
+    StreamAlreadyExists = 29,
+    StreamExhausted = 30,
+    // Quadratic Voting (#537)
+    InsufficientVoiceCredits = 31,
+    VoterNotAllocated = 32,
+    // Insurance (#538)
+    PolicyNotFound = 33,
+    PolicyExpired = 34,
+    PolicyInactive = 35,
+    ClaimNotFound = 36,
+    ClaimAlreadyResolved = 37,
+    InsufficientPoolBalance = 38,
+    // Hooks (#539)
+    HookNotFound = 39,
+    HookLimitExceeded = 40,
+    HookAlreadyInactive = 41,
 }

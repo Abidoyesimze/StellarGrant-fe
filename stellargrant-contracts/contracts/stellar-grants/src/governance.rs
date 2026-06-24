@@ -2,8 +2,9 @@ use soroban_sdk::{Address, Env, String};
 
 use crate::constants::MAX_BIO_LEN;
 use crate::events::Events;
+use crate::quadratic;
 use crate::storage::Storage;
-use crate::types::{ContractError, Grant, Milestone, MilestoneState};
+use crate::types::{ContractError, Grant, Milestone, MilestoneState, VotingMechanism};
 
 pub struct VoteResult {
     pub approved: bool,
@@ -12,7 +13,7 @@ pub struct VoteResult {
 }
 
 /// Cast a vote (approve = true, reject = false) on a milestone.
-/// Enforces: reviewer is registered, has not already voted, milestone is Submitted.
+/// Dispatches to quadratic voting if the grant uses QV mechanism.
 /// Handles reputation-weighted tallying, quorum detection, voter rewards,
 /// milestone state finalization, and event emission.
 pub fn cast_vote(
@@ -23,6 +24,27 @@ pub fn cast_vote(
     approve: bool,
     reason: Option<String>,
 ) -> Result<VoteResult, ContractError> {
+    let mechanism = Storage::get_voting_mechanism(env, grant.id);
+    if mechanism == VotingMechanism::Quadratic {
+        // Default 1 vote per cast_vote call in QV mode; credits must be pre-allocated.
+        let record = quadratic::cast_qv_vote(env, reviewer, grant.id, milestone.idx, 1, approve)?;
+        let quorum = quadratic::is_approved_qv(env, grant.id, milestone.idx)
+            || quadratic::tally_votes(env, grant.id, milestone.idx).1
+                > quadratic::tally_votes(env, grant.id, milestone.idx).0;
+        let (for_v, _) = quadratic::tally_votes(env, grant.id, milestone.idx);
+        let result = VoteResult {
+            approved: approve && quorum,
+            quorum_reached: quorum,
+            approval_pct: record.votes_cast,
+        };
+        if quorum {
+            let approved = quadratic::is_approved_qv(env, grant.id, milestone.idx);
+            finalize_milestone(milestone, &VoteResult { approved, quorum_reached: true, approval_pct: for_v });
+        }
+        Events::milestone_voted(env, grant.id, milestone.idx, reviewer.clone(), approve, reason);
+        return Ok(result);
+    }
+
     if milestone.state != MilestoneState::Submitted {
         env.panic_with_error(ContractError::MilestoneNotSubmitted);
     }

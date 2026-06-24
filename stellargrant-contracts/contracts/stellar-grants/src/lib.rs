@@ -6,22 +6,28 @@ mod emergency;
 mod errors;
 mod events;
 mod governance;
+mod hooks;
+mod insurance;
 mod migration;
+mod quadratic;
 mod reentrancy;
 mod registry;
 mod storage;
+mod streaming;
 mod types;
 
 pub use errors::ContractError;
 pub use events::Events;
 pub use storage::Storage;
 pub use types::{
-    AuditAction, AuditEntry, ContractError, ContractVersion, EscrowLifecycleState, EscrowMode,
-    EscrowState, Grant, GrantFund, GrantStatus, MigrationRecord, Milestone, MilestoneState,
-    MilestoneSubmission, RegistryEntry, RegistryEntryType,
+    AuditAction, AuditEntry, ContractVersion, EscrowLifecycleState, EscrowMode,
+    EscrowState, Grant, GrantFund, GrantStatus, HookCallResult, HookEvent, HookRegistration,
+    InsuranceClaim, InsurancePolicy, MigrationRecord, Milestone, MilestoneState,
+    MilestoneSubmission, PauseRecord, PaymentStream, QuadraticVoteRecord, RegistryEntry,
+    RegistryEntryType, VoiceCredits, VotingMechanism,
 };
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Bytes, Env, String, Vec};
 
 #[contract]
 pub struct StellarGrantsContract;
@@ -130,6 +136,10 @@ impl StellarGrantsContract {
             None,
             Some(total_amount),
         );
+
+        if hooks::has_hooks(&env, HookEvent::GrantCreated) {
+            hooks::trigger(&env, HookEvent::GrantCreated, Bytes::new(&env));
+        }
 
         Ok(grant_id)
     }
@@ -529,6 +539,9 @@ impl StellarGrantsContract {
                     Some(milestone_idx),
                     Some(milestone.amount),
                 );
+                if hooks::has_hooks(&env, HookEvent::MilestoneApproved) {
+                    hooks::trigger(&env, HookEvent::MilestoneApproved, Bytes::new(&env));
+                }
             } else {
                 audit::log(
                     &env,
@@ -1048,6 +1061,222 @@ impl StellarGrantsContract {
         }
 
         Ok(())
+    }
+
+    // ── Streaming Payments (#531) ───────────────────────────────────────────
+
+    /// Create a new payment stream for a grant milestone.
+    pub fn create_stream(
+        env: Env,
+        sender: Address,
+        recipient: Address,
+        grant_id: u64,
+        token: Address,
+        rate_per_ledger: i128,
+        duration_ledgers: u32,
+    ) -> Result<u32, ContractError> {
+        emergency::require_not_paused(&env)?;
+        streaming::create_stream(
+            &env,
+            &sender,
+            &recipient,
+            grant_id,
+            &token,
+            rate_per_ledger,
+            duration_ledgers,
+        )
+    }
+
+    /// Recipient withdraws accrued tokens from a stream.
+    pub fn withdraw_stream(
+        env: Env,
+        recipient: Address,
+        stream_id: u32,
+    ) -> Result<i128, ContractError> {
+        emergency::require_not_paused(&env)?;
+        streaming::withdraw_stream(&env, &recipient, stream_id)
+    }
+
+    /// Cancel a stream, splitting remaining deposit between sender and recipient.
+    pub fn cancel_stream(
+        env: Env,
+        sender: Address,
+        stream_id: u32,
+    ) -> Result<(i128, i128), ContractError> {
+        streaming::cancel_stream(&env, &sender, stream_id)
+    }
+
+    /// Pause an active stream.
+    pub fn pause_stream(env: Env, sender: Address, stream_id: u32) -> Result<(), ContractError> {
+        streaming::pause_stream(&env, &sender, stream_id)
+    }
+
+    /// Resume a paused stream.
+    pub fn resume_stream(env: Env, sender: Address, stream_id: u32) -> Result<(), ContractError> {
+        streaming::resume_stream(&env, &sender, stream_id)
+    }
+
+    /// Get stream details by id.
+    pub fn get_stream(env: Env, stream_id: u32) -> Result<PaymentStream, ContractError> {
+        streaming::get_stream(&env, stream_id)
+    }
+
+    // ── Quadratic Voting (#537) ─────────────────────────────────────────────
+
+    /// Allocate voice credits to a reviewer for a grant.
+    pub fn allocate_voice_credits(
+        env: Env,
+        admin: Address,
+        voter: Address,
+        grant_id: u64,
+        credits: u32,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        if Storage::get_global_admin(&env) != Some(admin.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        quadratic::allocate_credits(&env, &voter, grant_id, credits)
+    }
+
+    /// Cast a quadratic vote on a milestone.
+    pub fn cast_qv_vote(
+        env: Env,
+        voter: Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        votes: u32,
+        in_favor: bool,
+    ) -> Result<QuadraticVoteRecord, ContractError> {
+        emergency::require_not_paused(&env)?;
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if !grant.reviewers.contains(voter.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        quadratic::cast_qv_vote(&env, &voter, grant_id, milestone_idx, votes, in_favor)
+    }
+
+    /// Return remaining voice credits for a voter on a grant.
+    pub fn remaining_voice_credits(env: Env, voter: Address, grant_id: u64) -> u32 {
+        quadratic::remaining_credits(&env, &voter, grant_id)
+    }
+
+    /// Check if a milestone is approved by QV tally.
+    pub fn is_qv_approved(env: Env, grant_id: u64, milestone_idx: u32) -> bool {
+        quadratic::is_approved_qv(&env, grant_id, milestone_idx)
+    }
+
+    /// Return all QV vote records for a milestone.
+    pub fn get_qv_votes(
+        env: Env,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Vec<QuadraticVoteRecord> {
+        quadratic::get_qv_votes(&env, grant_id, milestone_idx)
+    }
+
+    // ── Grant Insurance Pool (#538) ─────────────────────────────────────────
+
+    /// Purchase insurance for a grant.
+    pub fn purchase_insurance(
+        env: Env,
+        policyholder: Address,
+        grant_id: u64,
+        token: Address,
+        coverage_amount: i128,
+    ) -> Result<InsurancePolicy, ContractError> {
+        emergency::require_not_paused(&env)?;
+        insurance::purchase_policy(&env, &policyholder, grant_id, &token, coverage_amount)
+    }
+
+    /// File an insurance claim for a grant.
+    pub fn file_insurance_claim(
+        env: Env,
+        claimant: Address,
+        grant_id: u64,
+        claimed_amount: i128,
+        reason: String,
+    ) -> Result<u32, ContractError> {
+        emergency::require_not_paused(&env)?;
+        insurance::file_claim(&env, &claimant, grant_id, claimed_amount, reason)
+    }
+
+    /// Approve and pay out a claim. Admin only.
+    pub fn approve_insurance_claim(
+        env: Env,
+        admin: Address,
+        claim_id: u32,
+        payout_amount: i128,
+    ) -> Result<(), ContractError> {
+        if Storage::get_global_admin(&env) != Some(admin.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        insurance::approve_claim(&env, &admin, claim_id, payout_amount)
+    }
+
+    /// Reject a claim. Admin only.
+    pub fn reject_insurance_claim(
+        env: Env,
+        admin: Address,
+        claim_id: u32,
+    ) -> Result<(), ContractError> {
+        if Storage::get_global_admin(&env) != Some(admin.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        insurance::reject_claim(&env, &admin, claim_id)
+    }
+
+    /// Return insurance pool balance for a token.
+    pub fn insurance_pool_balance(env: Env, token: Address) -> i128 {
+        insurance::pool_balance(&env, &token)
+    }
+
+    /// Return the insurance policy for a grant.
+    pub fn get_insurance_policy(env: Env, grant_id: u64) -> Option<InsurancePolicy> {
+        insurance::get_policy(&env, grant_id)
+    }
+
+    /// Return a claim by id.
+    pub fn get_insurance_claim(env: Env, claim_id: u32) -> Result<InsuranceClaim, ContractError> {
+        insurance::get_claim(&env, claim_id)
+    }
+
+    // ── External Callback Hooks (#539) ──────────────────────────────────────
+
+    /// Register an external contract hook for an event. Admin only.
+    pub fn register_hook(
+        env: Env,
+        admin: Address,
+        event: HookEvent,
+        target_contract: Address,
+        max_gas_budget: u32,
+    ) -> Result<u32, ContractError> {
+        if Storage::get_global_admin(&env) != Some(admin.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        hooks::register_hook(&env, &admin, event, target_contract, max_gas_budget)
+    }
+
+    /// Deactivate a registered hook. Admin only.
+    pub fn deactivate_hook(
+        env: Env,
+        admin: Address,
+        event: HookEvent,
+        hook_index: u32,
+    ) -> Result<(), ContractError> {
+        if Storage::get_global_admin(&env) != Some(admin.clone()) {
+            return Err(ContractError::Unauthorized);
+        }
+        hooks::deactivate_hook(&env, &admin, event, hook_index)
+    }
+
+    /// Return all registered hooks for an event.
+    pub fn get_hooks(env: Env, event: HookEvent) -> Vec<HookRegistration> {
+        hooks::get_hooks(&env, event)
+    }
+
+    /// Check if any active hooks are registered for an event.
+    pub fn has_hooks(env: Env, event: HookEvent) -> bool {
+        hooks::has_hooks(&env, event)
     }
 }
 

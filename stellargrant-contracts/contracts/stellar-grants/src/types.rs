@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Map, String, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, Map, String, Vec};
 
 pub use crate::errors::ContractError;
 
@@ -180,3 +180,148 @@ pub struct AuditEntry {
     pub timestamp: u64,
     pub ledger_sequence: u32,
 }
+
+// ── Emergency Pause (#521) ───────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PauseRecord {
+    pub paused_by: Address,
+    pub paused_at: u64,
+    pub unpaused_at: Option<u64>,
+    pub reason: String,
+}
+
+// ── Streaming Payments (#531) ─────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StreamStatus {
+    Active = 0,
+    Cancelled = 1,
+    Completed = 2,
+    Paused = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaymentStream {
+    pub id: u32,
+    pub grant_id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    pub token: Address,
+    pub rate_per_ledger: i128,
+    pub deposited: i128,
+    pub withdrawn: i128,
+    pub start_ledger: u32,
+    pub end_ledger: u32,
+    pub status: StreamStatus,
+    pub created_at: u64,
+    /// Ledger at which stream was paused (0 if not paused).
+    pub paused_at_ledger: u32,
+}
+
+// ── Quadratic Voting (#537) ────────────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VotingMechanism {
+    SimpleMajority = 0,
+    Quadratic = 1,
+    Weighted = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VoiceCredits {
+    pub voter: Address,
+    pub grant_id: u64,
+    pub total_credits: u32,
+    pub spent_credits: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuadraticVoteRecord {
+    pub voter: Address,
+    pub milestone_idx: u32,
+    pub votes_cast: u32,
+    pub credits_spent: u32,
+    pub in_favor: bool,
+}
+
+// ── Grant Insurance Pool (#538) ───────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InsuranceClaimStatus {
+    Submitted = 0,
+    UnderReview = 1,
+    Approved = 2,
+    Rejected = 3,
+    Paid = 4,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InsurancePolicy {
+    pub grant_id: u64,
+    pub policyholder: Address,
+    pub token: Address,
+    pub coverage_amount: i128,
+    pub premium_paid: i128,
+    pub issued_at: u64,
+    pub expires_at: u64,
+    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InsuranceClaim {
+    pub id: u32,
+    pub policy_grant_id: u64,
+    pub claimant: Address,
+    pub claimed_amount: i128,
+    pub reason: String,
+    pub status: InsuranceClaimStatus,
+    pub submitted_at: u64,
+    pub resolved_at: Option<u64>,
+    pub payout_amount: Option<i128>,
+}
+
+// ── External Callback Hooks (#539) ────────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HookEvent {
+    GrantCreated = 0,
+    MilestoneApproved = 1,
+    MilestonePaid = 2,
+    DisputeRaised = 3,
+    DisputeResolved = 4,
+    ContributorRegistered = 5,
+    BountyAwarded = 6,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookRegistration {
+    pub event: HookEvent,
+    pub target_contract: Address,
+    pub registered_by: Address,
+    pub registered_at: u64,
+    pub is_active: bool,
+    pub max_gas_budget: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookCallResult {
+    pub hook_index: u32,
+    pub success: bool,
+    pub error_code: Option<u32>,
+}
+
+/// Opaque byte payload passed to hook callbacks.
+pub type HookPayload = Bytes;

@@ -145,6 +145,21 @@ pub struct ReviewerRevoked {
     pub timestamp: u64,
 }
 
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractPaused {
+    pub admin: Address,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractUnpaused {
+    pub admin: Address,
+    pub timestamp: u64,
+}
+
 pub struct Events;
 
 impl Events {
@@ -349,6 +364,23 @@ impl Events {
         let event = ReviewerRevoked {
             reviewer,
             revoked_by,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_contract_paused(env: &Env, admin: Address, reason: String) {
+        let event = ContractPaused {
+            admin,
+            reason,
+            timestamp: env.ledger().timestamp(),
+        };
+        event.publish(env);
+    }
+
+    pub fn emit_contract_unpaused(env: &Env, admin: Address) {
+        let event = ContractUnpaused {
+            admin,
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);

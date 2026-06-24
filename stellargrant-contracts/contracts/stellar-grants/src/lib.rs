@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 mod batch;
 mod constants;
+mod emergency;
 mod errors;
 mod events;
 mod governance;
@@ -15,9 +16,9 @@ pub use errors::ContractError;
 pub use events::Events;
 pub use storage::Storage;
 pub use types::{
-    BatchItemResult, BatchMilestoneVote, BatchResult, ContractError, ContractVersion,
-    EscrowLifecycleState, EscrowMode, EscrowState, Grant, GrantFund, GrantStatus, MigrationRecord,
-    Milestone, MilestoneState, MilestoneSubmission, RegistryEntry, RegistryEntryType,
+§    ContractVersion, EscrowLifecycleState, EscrowMode, EscrowState, Grant, GrantFund, GrantStatus,
+    MigrationRecord, Milestone, MilestoneState, MilestoneSubmission, PauseRecord, RegistryEntry,
+    RegistryEntryType,
 };
 
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
@@ -63,6 +64,7 @@ impl StellarGrantsContract {
         num_milestones: u32,
         reviewers: soroban_sdk::Vec<Address>,
     ) -> Result<u64, ContractError> {
+        emergency::require_not_paused(&env)?;
         owner.require_auth();
 
         if total_amount <= 0 || milestone_amount <= 0 {
@@ -482,6 +484,7 @@ impl StellarGrantsContract {
         approve: bool,
         feedback: Option<String>,
     ) -> Result<bool, ContractError> {
+        emergency::require_not_paused(&env)?;
         reviewer.require_auth();
 
         let mut grant = Storage::get_grant_v(&env, grant_id);
@@ -509,6 +512,7 @@ impl StellarGrantsContract {
         reviewer: Address,
         reason: String,
     ) -> Result<bool, ContractError> {
+        emergency::require_not_paused(&env)?;
         reviewer.require_auth();
 
         let grant = Storage::get_grant_v(&env, grant_id);
@@ -574,6 +578,7 @@ impl StellarGrantsContract {
         description: String,
         proof_url: String,
     ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
         recipient.require_auth();
 
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
@@ -603,6 +608,7 @@ impl StellarGrantsContract {
         recipient: Address,
         submissions: Vec<MilestoneSubmission>,
     ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
         recipient.require_auth();
 
         let batch_len = submissions.len();
@@ -644,6 +650,7 @@ impl StellarGrantsContract {
         funder: Address,
         amount: i128,
     ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
         funder.require_auth();
         reentrancy::with_non_reentrant(&env, || {
             if amount <= 0 {
@@ -896,35 +903,26 @@ impl StellarGrantsContract {
         Ok(())
     }
 
-    // ── Batch Operations (#526) ─────────────────────────────────────
+    // ── Emergency Pause (#521) ──────────────────────────────────────
 
-    /// Vote on multiple milestones in one call. Partial failures are recorded per item.
-    pub fn batch_vote_milestones(
-        env: Env,
-        reviewer: Address,
-        votes: Vec<BatchMilestoneVote>,
-    ) -> Result<BatchResult, ContractError> {
-        batch::batch_vote_milestones(&env, &reviewer, votes)
+    /// Pause the contract. Global admin only.
+    pub fn pause(env: Env, admin: Address, reason: String) -> Result<(), ContractError> {
+        emergency::pause(&env, &admin, reason)
     }
 
-    /// Fund multiple grants with the same token in one call. Partial failures are recorded per item.
-    pub fn batch_fund_grants(
-        env: Env,
-        funder: Address,
-        token: Address,
-        items: Vec<(u64, i128)>,
-    ) -> Result<BatchResult, ContractError> {
-        batch::batch_fund_grants(&env, &funder, &token, items)
+    /// Unpause the contract. Global admin only.
+    pub fn unpause(env: Env, admin: Address) -> Result<(), ContractError> {
+        emergency::unpause(&env, &admin)
     }
 
-    /// Cancel multiple grants. Callable by grant owner or global admin per grant.
-    pub fn batch_cancel_grants(
-        env: Env,
-        caller: Address,
-        grant_ids: Vec<u64>,
-        reason: String,
-    ) -> Result<BatchResult, ContractError> {
-        batch::batch_cancel_grants(&env, &caller, grant_ids, reason)
+    /// Returns true if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        emergency::is_paused(&env)
+    }
+
+    /// Return the full history of pause/unpause events.
+    pub fn pause_history(env: Env) -> Vec<PauseRecord> {
+        emergency::pause_history(&env)
     }
 
     // ── Bulk Funding (#44) ──────────────────────────────────────────

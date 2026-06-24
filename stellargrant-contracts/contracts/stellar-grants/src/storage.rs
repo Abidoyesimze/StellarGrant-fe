@@ -1,6 +1,6 @@
 use crate::types::{
     ContractError, ContractVersion, ContributorProfile, EscrowState, Grant, MigrationRecord,
-    Milestone, RegistryEntry,
+    Milestone, PauseRecord, RegistryEntry,
 };
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
@@ -27,6 +27,9 @@ pub enum DataKey {
     // Global registry (#520)
     ContributorIndex,
     ReviewerAllowlist,
+    // Emergency pause (#521)
+    IsPaused,
+    PauseHistory,
 }
 
 pub struct Storage;
@@ -243,5 +246,47 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&DataKey::ReviewerAllowlist, list);
+    }
+
+    // ── Emergency Pause (#521) ────────────────────────────────────────
+
+    pub fn get_is_paused(env: &Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::IsPaused)
+            .unwrap_or(false)
+    }
+
+    pub fn set_is_paused(env: &Env, paused: bool) {
+        env.storage().persistent().set(&DataKey::IsPaused, &paused);
+    }
+
+    pub fn get_pause_history(env: &Env) -> Vec<PauseRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PauseHistory)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    pub fn append_pause_record(env: &Env, record: &PauseRecord) {
+        let mut history = Self::get_pause_history(env);
+        history.push_back(record.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::PauseHistory, &history);
+    }
+
+    pub fn set_latest_pause_unpaused_at(env: &Env, unpaused_at: u64) {
+        let mut history = Self::get_pause_history(env);
+        if history.is_empty() {
+            return;
+        }
+        let last_idx = history.len() - 1;
+        let mut record = history.get(last_idx).unwrap();
+        record.unpaused_at = Some(unpaused_at);
+        history.set(last_idx, record);
+        env.storage()
+            .persistent()
+            .set(&DataKey::PauseHistory, &history);
     }
 }

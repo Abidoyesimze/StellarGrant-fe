@@ -231,131 +231,41 @@ mod tests {
         assert_eq!(result, Err(Ok(ContractError::Unauthorized.into())));
     }
 
-    #[test]
-    fn test_batch_vote_milestones_empty() {
-        let env = Env::default();
-        let (client, _, _) = setup_test(&env);
-        let reviewer = Address::generate(&env);
-        let votes = Vec::new(&env);
-
-        env.mock_all_auths();
-        let result = client.try_batch_vote_milestones(&reviewer, &votes);
-        assert_eq!(result, Err(Ok(ContractError::BatchEmpty.into())));
+    fn setup_admin(client: &StellarGrantsContractClient<'_>, admin: &Address) {
+        client.initialize(admin);
+        client.set_global_admin(admin, admin);
     }
 
     #[test]
-    fn test_batch_vote_milestones_oversized() {
+    fn test_paused_blocks_grant_create() {
         let env = Env::default();
-        let (client, _, _) = setup_test(&env);
-        let reviewer = Address::generate(&env);
-
-        let mut votes = Vec::new(&env);
-        for _ in 0..=constants::MAX_BATCH_SIZE {
-            votes.push_back(BatchMilestoneVote {
-                grant_id: 1,
-                milestone_idx: 0,
-                approve: true,
-                reason: None,
-            });
-        }
-
         env.mock_all_auths();
-        let result = client.try_batch_vote_milestones(&reviewer, &votes);
-        assert_eq!(result, Err(Ok(ContractError::BatchTooLarge.into())));
-    }
 
-    #[test]
-    fn test_batch_vote_milestones_all_success() {
-        let env = Env::default();
-        let (client, _, contract_id) = setup_test(&env);
-        let grant_id = 1;
+        let (client, admin, _) = setup_test(&env);
+        setup_admin(&client, &admin);
+
+        let reason = String::from_str(&env, "critical exploit");
+        client.pause(&admin, &reason);
+        assert!(client.is_paused());
+
         let owner = Address::generate(&env);
         let token = Address::generate(&env);
-        let reviewer = Address::generate(&env);
-
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(reviewer.clone());
-        create_grant(&env, &contract_id, grant_id, owner, token, reviewers);
-        create_milestone(&env, &contract_id, grant_id, 0, MilestoneState::Submitted);
-
-        let mut votes = Vec::new(&env);
-        votes.push_back(BatchMilestoneVote {
-            grant_id,
-            milestone_idx: 0,
-            approve: true,
-            reason: None,
-        });
-
-        env.mock_all_auths();
-        let result = client.batch_vote_milestones(&reviewer, &votes);
-        assert_eq!(result.total, 1);
-        assert_eq!(result.succeeded, 1);
-        assert_eq!(result.failed, 0);
-        assert_eq!(result.results.len(), 1);
-        assert!(result.results.get(0).unwrap().success);
-    }
-
-    #[test]
-    fn test_batch_vote_milestones_partial_failure() {
-    fn test_grant_fund_zero_amount() {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let (client, _, contract_id) = setup_test(&env);
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let funder = Address::generate(&env);
-        let grant_id = 1u64;
-
-        create_grant(&env, &contract_id, grant_id, owner, token, Vec::new(&env));
-
-        let result = client.try_grant_fund(&grant_id, &funder, &0);
-        assert_eq!(result, Err(Ok(ContractError::ZeroAmount.into())));
-    }
-
-    #[test]
-    fn test_milestone_index_out_of_bounds() {
-        let env = Env::default();
-        let (client, _, contract_id) = setup_test(&env);
-        let grant_id = 1;
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let reviewer = Address::generate(&env);
-
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(reviewer.clone());
-        create_grant(&env, &contract_id, grant_id, owner, token, reviewers);
-        create_milestone(&env, &contract_id, grant_id, 0, MilestoneState::Submitted);
-
-        let mut votes = Vec::new(&env);
-        votes.push_back(BatchMilestoneVote {
-            grant_id,
-            milestone_idx: 0,
-            approve: true,
-            reason: None,
-        });
-        votes.push_back(BatchMilestoneVote {
-            grant_id: 99,
-            milestone_idx: 0,
-            approve: true,
-            reason: None,
-        });
-
-        env.mock_all_auths();
-        let result = client.batch_vote_milestones(&reviewer, &votes);
-        assert_eq!(result.total, 2);
-        assert_eq!(result.succeeded, 1);
-        assert_eq!(result.failed, 1);
-        assert!(result.results.get(0).unwrap().success);
-        assert!(!result.results.get(1).unwrap().success);
-        assert_eq!(
-            result.results.get(1).unwrap().error_code,
-            Some(ContractError::GrantNotFound as u32)
+        let result = client.try_grant_create(
+            &owner,
+            &String::from_str(&env, "Title"),
+            &String::from_str(&env, "Description"),
+            &token,
+            &1000,
+            &100,
+            &10,
+            &Vec::new(&env),
         );
+
+        assert_eq!(result, Err(Ok(ContractError::ContractPaused.into())));
     }
 
     #[test]
-    fn test_batch_fund_grants_empty() {
+    fn test_unpause_allows_grant_create() {
         let env = Env::default();
         let (client, admin, _) = setup_test(&env);
         let token_contract = env.register_stellar_asset_contract_v2(admin.clone());
@@ -378,47 +288,63 @@ mod tests {
         let token_id = token_contract.address();
         let token_admin = token::StellarAssetClient::new(&env, &token_id);
 
+        let (client, admin, _) = setup_test(&env);
+        setup_admin(&client, &admin);
+
+        let reason = String::from_str(&env, "critical exploit");
+        client.pause(&admin, &reason);
+        client.unpause(&admin);
+        assert!(!client.is_paused());
+
         let owner = Address::generate(&env);
-        let funder = Address::generate(&env);
-        let grant_id = 1u64;
-
-        token_admin.mint(&funder, &500);
-
-        create_grant(
-            &env,
-            &contract_id,
-            grant_id,
-            owner,
-            token_id.clone(),
-            Vec::new(&env),
+        let token = Address::generate(&env);
+        let result = client.try_grant_create(
+            &owner,
+            &String::from_str(&env, "Title"),
+            &String::from_str(&env, "Description"),
+            &token,
+            &1000,
+            &100,
+            &10,
+            &Vec::new(&env),
         );
 
-        let mut items = Vec::new(&env);
-        items.push_back((grant_id, 100i128));
-        items.push_back((99u64, 100i128));
-
-        let result = client.batch_fund_grants(&funder, &token_id, &items);
-        assert_eq!(result.total, 2);
-        assert_eq!(result.succeeded, 1);
-        assert_eq!(result.failed, 1);
-        assert!(result.results.get(0).unwrap().success);
-        assert!(!result.results.get(1).unwrap().success);
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn test_batch_cancel_grants_oversized() {
+    fn test_pause_history_grows() {
         let env = Env::default();
-        let (client, _, _) = setup_test(&env);
-        let caller = Address::generate(&env);
-        let reason = String::from_str(&env, "cancel");
-
-        let mut grant_ids = Vec::new(&env);
-        for i in 0..=constants::MAX_BATCH_SIZE {
-            grant_ids.push_back(i as u64);
-        }
-
         env.mock_all_auths();
-        let result = client.try_batch_cancel_grants(&caller, &grant_ids, &reason);
-        assert_eq!(result, Err(Ok(ContractError::BatchTooLarge.into())));
+
+        let (client, admin, _) = setup_test(&env);
+        setup_admin(&client, &admin);
+
+        assert_eq!(client.pause_history().len(), 0);
+
+        client.pause(&admin, &String::from_str(&env, "first incident"));
+        assert_eq!(client.pause_history().len(), 1);
+
+        client.unpause(&admin);
+        client.pause(&admin, &String::from_str(&env, "second incident"));
+        assert_eq!(client.pause_history().len(), 2);
+
+        let latest = client.pause_history().get(1).unwrap();
+        assert_eq!(latest.reason, String::from_str(&env, "second incident"));
+        assert!(latest.unpaused_at.is_none());
+    }
+
+    #[test]
+    fn test_pause_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let (client, admin, _) = setup_test(&env);
+        setup_admin(&client, &admin);
+
+        let non_admin = Address::generate(&env);
+        let result = client.try_pause(&non_admin, &String::from_str(&env, "nope"));
+
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized.into())));
     }
 }

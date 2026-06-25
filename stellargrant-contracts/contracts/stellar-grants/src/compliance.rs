@@ -91,8 +91,18 @@ pub fn require_compliant(
     address: &Address,
     required_level: ComplianceLevel,
 ) -> Result<(), ContractError> {
+    require_compliant_u32(env, address, required_level as u32)
+}
+
+/// Check if an address meets the required compliance level (u32 version).
+/// Returns Err if not compliant, expired, or rejected.
+pub fn require_compliant_u32(
+    env: &Env,
+    address: &Address,
+    required_level: u32,
+) -> Result<(), ContractError> {
     // ComplianceLevel::None means no check required.
-    if matches!(required_level, ComplianceLevel::None) {
+    if required_level == ComplianceLevel::None as u32 {
         return Ok(());
     }
 
@@ -112,8 +122,7 @@ pub fn require_compliant(
     }
 
     let attestation_level = attestation.level.clone() as u32;
-    let required_level_u32 = required_level as u32;
-    if attestation_level < required_level_u32 {
+    if attestation_level < required_level {
         return Err(ContractError::ComplianceCheckFailed);
     }
 

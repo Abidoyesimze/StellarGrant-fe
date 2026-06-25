@@ -64,4 +64,21 @@ pub enum ContractError {
     ComplianceCheckFailed = 51,
     VerifierNotSet = 52,
     NotVerifier = 53,
+    // Token Swap (#576)
+    DexNotConfigured = 54,
+    SwapExceedsSlippage = 55,
+    SwapFailed = 56,
+    InvalidSwapRoute = 57,
+    // Checklist (#581)
+    ChecklistNotFound = 58,
+    CriterionNotFound = 59,
+    ChecklistAlreadySubmitted = 60,
+    RequiredCriteriaNotMet = 61,
+    MaxCriteriaExceeded = 62,
+    // Scoring (#589)
+    RubricNotFound = 63,
+    InvalidWeights = 64,
+    // Circuit Breaker (#594)
+    ModuleTripped = 65,
+    BreakerNotTripped = 66,
 }

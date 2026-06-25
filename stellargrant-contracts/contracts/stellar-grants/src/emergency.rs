@@ -1,9 +1,10 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
+use crate::circuit_breaker;
 use crate::errors::ContractError;
 use crate::events::Events;
 use crate::storage::Storage;
-use crate::types::PauseRecord;
+use crate::types::{PauseRecord, ProtocolModule};
 
 fn require_global_admin(env: &Env, admin: &Address) -> Result<(), ContractError> {
     let global_admin = Storage::get_global_admin(env).ok_or(ContractError::Unauthorized)?;
@@ -18,7 +19,7 @@ pub fn is_paused(env: &Env) -> bool {
     Storage::get_is_paused(env)
 }
 
-/// Pause the contract. Admin only. Stores a PauseRecord.
+/// Pause the contract. Admin only. Stores a PauseRecord and trips all breakers.
 pub fn pause(env: &Env, admin: &Address, reason: String) -> Result<(), ContractError> {
     admin.require_auth();
     require_global_admin(env, admin)?;
@@ -28,6 +29,31 @@ pub fn pause(env: &Env, admin: &Address, reason: String) -> Result<(), ContractE
     }
 
     Storage::set_is_paused(env, true);
+
+    let all_modules = [
+        ProtocolModule::Grants,
+        ProtocolModule::Streaming,
+        ProtocolModule::Bounty,
+        ProtocolModule::Dao,
+        ProtocolModule::Staking,
+        ProtocolModule::Vesting,
+        ProtocolModule::YieldEscrow,
+        ProtocolModule::MatchingPool,
+        ProtocolModule::Crowdfund,
+        ProtocolModule::Insurance,
+        ProtocolModule::Relay,
+        ProtocolModule::TokenSwap,
+        ProtocolModule::Oracle,
+    ];
+    for m in all_modules.iter() {
+        let _ = circuit_breaker::trip(
+            env,
+            admin,
+            m.clone(),
+            reason.clone(),
+            None,
+        );
+    }
 
     let record = PauseRecord {
         paused_by: admin.clone(),

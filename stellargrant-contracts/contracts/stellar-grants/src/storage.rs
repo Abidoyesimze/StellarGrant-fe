@@ -1,10 +1,11 @@
 use crate::types::{
-    AuditEntry, ComplianceAttestation, ContractError, ContractVersion, ContributorProfile, Dispute,
-    EscrowAccount, EscrowState, FunderLedger, Grant, GrantCategory, GrantTag, HookEvent,
-    HookRegistration, InsuranceClaim, InsurancePolicy, MigrationRecord, Milestone, MultisigProposal,
-    OracleConfig, PauseRecord, PaymentStream, ProtocolConfig, ProtocolMetrics, QuadraticVoteRecord,
-    RegistryEntry, RelayAllowance, RelayConfig, RenewalProposal, ReviewerProfile, ReviewerRequest,
-    TokenMetric, VoiceCredits, VotingMechanism,
+    AcceptanceCriteria, AuditEntry, BreakerState, ChecklistSubmission, ComplianceAttestation,
+    ContractError, ContractVersion, ContributorProfile, DexConfig, Dispute, EscrowAccount,
+    EscrowState, FunderLedger, Grant, GrantCategory, GrantTag, HookEvent, HookRegistration,
+    InsuranceClaim, InsurancePolicy, MigrationRecord, Milestone, MultisigProposal, OracleConfig,
+    PauseRecord, PaymentStream, ProtocolConfig, ProtocolMetrics, ProtocolModule,
+    QuadraticVoteRecord, RegistryEntry, RelayAllowance, RelayConfig, RenewalProposal,
+    ReviewerProfile, ReviewerRequest, ScoringRubric, TokenMetric, VoiceCredits, VotingMechanism,
 };
 use soroban_sdk::{contracttype, Address, Env, Vec};
 
@@ -87,6 +88,16 @@ pub enum DataKey {
     // Issue #577: grant renewal module
     RenewalProposal(u64),
     RenewalHistory(u64),
+    // Issue #576: token swap DEX config
+    DexConfig,
+    // Issue #581: milestone checklist
+    MilestoneChecklist(u64, u32),
+    ChecklistSubmission(u64, u32),
+    // Issue #589: scoring rubric
+    ScoringRubric(u32),
+    ScoringRubricCounter,
+    // Issue #594: circuit breaker
+    BreakerState(ProtocolModule),
 }
 
 const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
@@ -872,5 +883,88 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&DataKey::RenewalHistory(grant_id), &original_grant_id);
+    }
+
+    // ── Issue #576: Token Swap ──────────────────────────────────────────────────
+
+    pub fn get_dex_config(env: &Env) -> Option<DexConfig> {
+        env.storage().persistent().get(&DataKey::DexConfig)
+    }
+
+    pub fn set_dex_config(env: &Env, config: &DexConfig) {
+        env.storage().persistent().set(&DataKey::DexConfig, config);
+    }
+
+    // ── Issue #581: Milestone Checklist ─────────────────────────────────────────
+
+    pub fn get_milestone_checklist(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<Vec<AcceptanceCriteria>> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MilestoneChecklist(grant_id, milestone_idx))
+    }
+
+    pub fn set_milestone_checklist(env: &Env, grant_id: u64, milestone_idx: u32, criteria: &Vec<AcceptanceCriteria>) {
+        let key = DataKey::MilestoneChecklist(grant_id, milestone_idx);
+        env.storage().persistent().set(&key, criteria);
+        Self::bump_persistent_ttl(env, &key);
+    }
+
+    pub fn get_checklist_submission(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<ChecklistSubmission> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ChecklistSubmission(grant_id, milestone_idx))
+    }
+
+    pub fn set_checklist_submission(env: &Env, submission: &ChecklistSubmission) {
+        let key = DataKey::ChecklistSubmission(submission.grant_id, submission.milestone_idx);
+        env.storage().persistent().set(&key, submission);
+        Self::bump_persistent_ttl(env, &key);
+    }
+
+    // ── Issue #589: Scoring ─────────────────────────────────────────────────────
+
+    pub fn next_rubric_id(env: &Env) -> u32 {
+        let mut id: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ScoringRubricCounter)
+            .unwrap_or(0);
+        id += 1;
+        env.storage()
+            .persistent()
+            .set(&DataKey::ScoringRubricCounter, &id);
+        id
+    }
+
+    pub fn get_scoring_rubric(env: &Env, rubric_id: u32) -> Option<ScoringRubric> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ScoringRubric(rubric_id))
+    }
+
+    pub fn set_scoring_rubric(env: &Env, rubric: &ScoringRubric) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::ScoringRubric(rubric.id), rubric);
+    }
+
+    // ── Issue #594: Circuit Breaker ─────────────────────────────────────────────
+
+    pub fn get_breaker_state(env: &Env, module: &ProtocolModule) -> Option<BreakerState> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::BreakerState(module.clone()))
+    }
+
+    pub fn set_breaker_state(env: &Env, state: &BreakerState) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::BreakerState(state.module.clone()), state);
+    }
+
+    pub fn remove_breaker(env: &Env, module: &ProtocolModule) {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BreakerState(module.clone()));
     }
 }

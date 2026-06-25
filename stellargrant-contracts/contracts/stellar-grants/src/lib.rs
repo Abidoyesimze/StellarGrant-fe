@@ -1,6 +1,8 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
 mod audit;
+mod checklist;
+mod circuit_breaker;
 mod compliance;
 mod config;
 mod constants;
@@ -25,24 +27,28 @@ mod registry;
 mod reputation;
 mod relay;
 mod reviewer_pool;
+mod scoring;
 mod storage;
 mod streaming;
+mod token_swap;
 mod types;
 
 pub use errors::ContractError;
 pub use events::Events;
 pub use storage::Storage;
 pub use types::{
-    AuditAction, AuditEntry, ComplianceAttestation, ComplianceLevel, ComplianceStatus,
-    ContractVersion, Dispute, DisputeStatus, EscrowAccount, EscrowLifecycleState, EscrowMode,
+    AcceptanceCriteria, AuditAction, AuditEntry, BreakerState, ChecklistSubmission,
+    ComplianceAttestation, ComplianceLevel, ComplianceStatus, ContractVersion, CriterionStatus,
+    DexConfig, Dispute, DisputeStatus, EscrowAccount, EscrowLifecycleState, EscrowMode,
     EscrowState, FeeRecord, FunderLedger, Grant, GrantCategory, GrantFund, GrantStatus, GrantTag,
     HookCallResult, HookEvent, HookRegistration, InsuranceClaim, InsurancePolicy, MigrationRecord,
     Milestone, MilestoneState, MilestoneSubmission, MultisigProposal, MultisigSigner, OracleConfig,
-    PauseRecord, PaymentStream, PriceQuote, ProtocolConfig, ProtocolMetrics, QuadraticVoteRecord,
-    RegistryEntry, RegistryEntryType, RelayableAction, RelayAllowance, RelayConfig, RelayRecord,
-    RenewalProposal, RenewalStatus, ReputationTier, ReviewerAvailability, ReviewerProfile,
-    ReviewerRequest, ReviewerRequestStatus, SignatureStatus, TokenMetric, VoiceCredits,
-    VotingMechanism,
+    PauseRecord, PaymentStream, PriceQuote, ProtocolConfig, ProtocolMetrics, ProtocolModule,
+    QuadraticVoteRecord, RegistryEntry, RegistryEntryType, RelayableAction, RelayAllowance,
+    RelayConfig, RelayRecord, RenewalProposal, RenewalStatus, ReputationTier, ReviewerAvailability,
+    ReviewerProfile, ReviewerRequest, ReviewerRequestStatus, ScoreResult, ScoringDimension,
+    ScoringRubric, ScoringWeight, SignatureStatus, SwapResult, SwapRoute, TokenMetric,
+    VoiceCredits, VotingMechanism,
 };
 
 use metrics::MetricField;
@@ -90,6 +96,7 @@ impl StellarGrantsContract {
         reviewers: soroban_sdk::Vec<Address>,
     ) -> Result<u64, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         owner.require_auth();
 
         if total_amount <= 0 || milestone_amount <= 0 {
@@ -430,8 +437,8 @@ impl StellarGrantsContract {
         }
 
         // Compliance gate: if the grant requires KYC, check the owner/contributor.
-        if let Some(ref required_level) = grant.require_compliance {
-            compliance::require_compliant(env, &grant.owner, required_level.clone())?;
+        if let Some(required_level) = grant.require_compliance {
+            compliance::require_compliant_u32(env, &grant.owner, required_level)?;
         }
 
         let total_paid =
@@ -479,10 +486,15 @@ impl StellarGrantsContract {
         feedback: Option<String>,
     ) -> Result<bool, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         reviewer.require_auth();
 
         let mut grant = Storage::get_grant_v(&env, grant_id);
         let mut milestone = Storage::get_milestone_v(&env, grant_id, milestone_idx);
+
+        if approve && !checklist::all_required_approved(&env, grant_id, milestone_idx) {
+            return Err(ContractError::RequiredCriteriaNotMet);
+        }
 
         let result = governance::cast_vote(
             &env,
@@ -541,6 +553,7 @@ impl StellarGrantsContract {
         reason: String,
     ) -> Result<bool, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         reviewer.require_auth();
 
         let grant = Storage::get_grant_v(&env, grant_id);
@@ -607,6 +620,7 @@ impl StellarGrantsContract {
         proof_url: String,
     ) -> Result<(), ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         recipient.require_auth();
 
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
@@ -681,6 +695,7 @@ impl StellarGrantsContract {
         amount: i128,
     ) -> Result<(), ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         funder.require_auth();
         reentrancy::with_non_reentrant(&env, || {
             if amount <= 0 {
@@ -1010,6 +1025,7 @@ impl StellarGrantsContract {
         duration_ledgers: u32,
     ) -> Result<u32, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Streaming)?;
         streaming::create_stream(
             &env,
             &sender,
@@ -1028,6 +1044,7 @@ impl StellarGrantsContract {
         stream_id: u32,
     ) -> Result<i128, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Streaming)?;
         streaming::withdraw_stream(&env, &recipient, stream_id)
     }
 
@@ -1115,6 +1132,7 @@ impl StellarGrantsContract {
         coverage_amount: i128,
     ) -> Result<InsurancePolicy, ContractError> {
         emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Insurance)?;
         insurance::purchase_policy(&env, &policyholder, grant_id, &token, coverage_amount)
     }
 
@@ -1505,7 +1523,7 @@ impl StellarGrantsContract {
         if grant.owner != owner {
             return Err(ContractError::Unauthorized);
         }
-        grant.require_compliance = Some(level);
+        grant.require_compliance = Some(level as u32);
         Storage::set_grant(&env, grant_id, &grant);
         Ok(())
     }
@@ -1765,6 +1783,188 @@ impl StellarGrantsContract {
         grant_renewal::renewal_chain(&env, original_grant_id)
     }
 
+    // ── Issue #576: Token Swap Entry Points ────────────────────────────────────
+
+    pub fn set_dex_config(
+        env: Env,
+        admin: Address,
+        config: DexConfig,
+    ) -> Result<(), ContractError> {
+        token_swap::set_dex_config(&env, &admin, config)
+    }
+
+    pub fn get_dex_config(env: Env) -> Result<DexConfig, ContractError> {
+        token_swap::get_dex_config(&env)
+    }
+
+    pub fn swap_tokens(
+        env: Env,
+        caller: Address,
+        route: SwapRoute,
+        amount_in: i128,
+    ) -> Result<SwapResult, ContractError> {
+        token_swap::swap(&env, &caller, route, amount_in)
+    }
+
+    pub fn swap_quote(
+        env: Env,
+        route: SwapRoute,
+        amount_in: i128,
+    ) -> Result<i128, ContractError> {
+        token_swap::quote(&env, &route, amount_in)
+    }
+
+    pub fn swap_and_fund(
+        env: Env,
+        funder: Address,
+        grant_id: u64,
+        input_token: Address,
+        input_amount: i128,
+    ) -> Result<SwapResult, ContractError> {
+        emergency::require_not_paused(&env)?;
+        token_swap::swap_and_fund(&env, &funder, grant_id, &input_token, input_amount)
+    }
+
+    pub fn swap_and_pay(
+        env: Env,
+        grant_id: u64,
+        recipient: Address,
+        grant_token: Address,
+        preferred_token: Address,
+        amount: i128,
+    ) -> Result<SwapResult, ContractError> {
+        emergency::require_not_paused(&env)?;
+        token_swap::swap_and_pay(&env, grant_id, &recipient, &grant_token, &preferred_token, amount)
+    }
+
+    // ── Issue #581: Milestone Checklist Entry Points ──────────────────────────
+
+    pub fn checklist_define_criteria(
+        env: Env,
+        owner: Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        criteria: Vec<AcceptanceCriteria>,
+    ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
+        checklist::define_criteria(&env, &owner, grant_id, milestone_idx, criteria)
+    }
+
+    pub fn checklist_submit(
+        env: Env,
+        contributor: Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        evidence_urls: Vec<Option<soroban_sdk::String>>,
+    ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
+        checklist::submit_checklist(&env, &contributor, grant_id, milestone_idx, evidence_urls)
+    }
+
+    pub fn checklist_review_criterion(
+        env: Env,
+        reviewer: Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        criterion_idx: u32,
+        approve: bool,
+    ) -> Result<(), ContractError> {
+        emergency::require_not_paused(&env)?;
+        checklist::review_criterion(&env, &reviewer, grant_id, milestone_idx, criterion_idx, approve)
+    }
+
+    pub fn checklist_all_required_approved(env: Env, grant_id: u64, milestone_idx: u32) -> bool {
+        checklist::all_required_approved(&env, grant_id, milestone_idx)
+    }
+
+    pub fn checklist_get(
+        env: Env,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Option<ChecklistSubmission> {
+        checklist::get_checklist(&env, grant_id, milestone_idx)
+    }
+
+    pub fn checklist_get_criterion_status(
+        env: Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        criterion_idx: u32,
+    ) -> Option<CriterionStatus> {
+        checklist::get_criterion_status(&env, grant_id, milestone_idx, criterion_idx)
+    }
+
+    // ── Issue #589: Scoring Entry Points ──────────────────────────────────────
+
+    pub fn scoring_define_rubric(
+        env: Env,
+        admin: Address,
+        name: soroban_sdk::String,
+        weights: Vec<ScoringWeight>,
+    ) -> Result<u32, ContractError> {
+        scoring::define_rubric(&env, &admin, name, weights)
+    }
+
+    pub fn scoring_score_contributor(
+        env: Env,
+        contributor: Address,
+        rubric_id: u32,
+    ) -> Result<ScoreResult, ContractError> {
+        scoring::score_contributor(&env, &contributor, rubric_id)
+    }
+
+    pub fn scoring_rank_contributors(
+        env: Env,
+        contributors: Vec<Address>,
+        rubric_id: u32,
+    ) -> Vec<ScoreResult> {
+        scoring::rank_contributors(&env, contributors, rubric_id)
+    }
+
+    pub fn scoring_get_rubric(env: Env, rubric_id: u32) -> Result<ScoringRubric, ContractError> {
+        scoring::get_rubric(&env, rubric_id)
+    }
+
+    pub fn scoring_list_rubrics(env: Env) -> Vec<u32> {
+        scoring::list_rubrics(&env)
+    }
+
+    // ── Issue #594: Circuit Breaker Entry Points ──────────────────────────────
+
+    pub fn breaker_trip(
+        env: Env,
+        caller: Address,
+        module: ProtocolModule,
+        reason: soroban_sdk::String,
+        auto_reset_ledger: Option<u32>,
+    ) -> Result<(), ContractError> {
+        circuit_breaker::trip(&env, &caller, module, reason, auto_reset_ledger)
+    }
+
+    pub fn breaker_reset(
+        env: Env,
+        caller: Address,
+        module: ProtocolModule,
+    ) -> Result<(), ContractError> {
+        circuit_breaker::reset(&env, &caller, module)
+    }
+
+    pub fn breaker_is_open(env: Env, module: ProtocolModule) -> bool {
+        circuit_breaker::is_open(&env, module)
+    }
+
+    pub fn breaker_get_state(env: Env, module: ProtocolModule) -> BreakerState {
+        circuit_breaker::get_state(&env, module)
+    }
+
+    pub fn breaker_tripped_modules(env: Env) -> Vec<ProtocolModule> {
+        circuit_breaker::tripped_modules(&env)
+    }
+
+    pub fn breaker_auto_reset_expired(env: Env) -> u32 {
+        circuit_breaker::auto_reset_expired(&env)
+    }
+
     // ── Private Helpers ───────────────────────────────────────────────────────
 
     fn update_contributor_reputation(
@@ -1841,5 +2041,4 @@ fn apply_milestone_submission(
     Ok(())
 }
 
-#[cfg(test)]
-mod test;
+

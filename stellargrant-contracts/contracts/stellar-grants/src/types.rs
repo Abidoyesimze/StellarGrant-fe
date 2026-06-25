@@ -101,7 +101,7 @@ pub struct Grant {
     pub funders: Vec<GrantFund>,
     pub reason: Option<String>,
     pub timestamp: u64,
-    pub require_compliance: Option<ComplianceLevel>,
+    pub require_compliance: Option<u32>,
 }
 
 #[contracttype]
@@ -511,7 +511,8 @@ pub struct ProtocolMetrics {
 // ── Issue #548: KYC/AML Compliance Integration Hooks ─────────────────────────
 
 #[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
 pub enum ComplianceStatus {
     Unverified = 0,
     Pending = 1,
@@ -521,7 +522,8 @@ pub enum ComplianceStatus {
 }
 
 #[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
 pub enum ComplianceLevel {
     None = 0,
     Basic = 1,
@@ -681,4 +683,139 @@ pub struct RenewalProposal {
     pub proposed_at: u64,
     pub expires_at: u64,
     pub new_grant_id: Option<u64>,
+}
+
+// ── Issue #576: In-Escrow Token Swap ──────────────────────────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DexConfig {
+    pub dex_contract: Address,
+    pub max_slippage_bps: u32,
+    pub is_active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwapRoute {
+    pub from_token: Address,
+    pub to_token: Address,
+    pub intermediary: Option<Address>,
+    pub min_out: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwapResult {
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub slippage_actual_bps: u32,
+    pub dex_contract: Address,
+    pub swapped_at: u64,
+}
+
+// ── Issue #581: Structured Milestone Acceptance Checklists ────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum CriterionStatus {
+    Pending = 0,
+    CheckedByContributor = 1,
+    ApprovedByReviewer = 2,
+    RejectedByReviewer = 3,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AcceptanceCriteria {
+    pub idx: u32,
+    pub description: soroban_sdk::String,
+    pub is_required: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChecklistSubmission {
+    pub grant_id: u64,
+    pub milestone_idx: u32,
+    pub criteria: soroban_sdk::Vec<AcceptanceCriteria>,
+    pub statuses: soroban_sdk::Vec<CriterionStatus>,
+    pub evidence_urls: soroban_sdk::Vec<Option<soroban_sdk::String>>,
+    pub submitted_at: u64,
+    pub all_required_met: bool,
+}
+
+// ── Issue #589: Pluggable Grant and Contributor Scoring Engine ────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ScoringDimension {
+    DeliverySpeed = 0,
+    ApprovalRate = 1,
+    ReputationScore = 2,
+    TotalEarned = 3,
+    DisputeRate = 4,
+    ReviewerSatisfaction = 5,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScoringWeight {
+    pub dimension: ScoringDimension,
+    pub weight_bps: u32,
+    pub invert: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScoringRubric {
+    pub id: u32,
+    pub name: soroban_sdk::String,
+    pub weights: soroban_sdk::Vec<ScoringWeight>,
+    pub created_by: Address,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScoreResult {
+    pub subject: Address,
+    pub rubric_id: u32,
+    pub total_score: u32,
+    pub dimension_scores: soroban_sdk::Vec<(ScoringDimension, u32)>,
+    pub computed_at: u64,
+}
+
+// ── Issue #594: Per-Module Fine-Grained Circuit Breakers ──────────────────────
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ProtocolModule {
+    Grants = 0,
+    Streaming = 1,
+    Bounty = 2,
+    Dao = 3,
+    Staking = 4,
+    Vesting = 5,
+    YieldEscrow = 6,
+    MatchingPool = 7,
+    Crowdfund = 8,
+    Insurance = 9,
+    Relay = 10,
+    TokenSwap = 11,
+    Oracle = 12,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BreakerState {
+    pub module: ProtocolModule,
+    pub tripped: bool,
+    pub tripped_by: Option<Address>,
+    pub tripped_at: Option<u64>,
+    pub reason: Option<soroban_sdk::String>,
+    pub auto_reset_ledger: Option<u32>,
 }

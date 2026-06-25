@@ -1,36 +1,11 @@
 #![no_std]
-#![allow(clippy::too_many_arguments, dead_code)]
-mod audit;
-mod bounty;
-mod checklist;
-mod circuit_breaker;
-mod compliance;
-mod config;
-mod constants;
-mod dao;
-mod dispute;
-mod emergency;
-mod errors;
-mod escrow;
+#![allow(clippy::too_many_arguments)]
+
+mod badge;
+mod delegate;
 mod events;
-mod fees;
-mod governance;
-mod grant_renewal;
-mod grant_tags;
-mod hooks;
-mod insurance;
-mod metrics;
-mod migration;
-mod multisig;
-mod oracle;
-mod pagination;
-mod quadratic;
-mod reentrancy;
-mod registry;
-mod relay;
-mod reputation;
-mod reviewer_pool;
-mod scoring;
+mod refund;
+mod snapshot;
 mod storage;
 mod streaming;
 mod token_swap;
@@ -41,997 +16,281 @@ pub use errors::ContractError;
 pub use events::Events;
 pub use storage::Storage;
 pub use types::{
-    AcceptanceCriteria, AuditAction, AuditEntry, BreakerState, ChecklistSubmission,
-    ComplianceAttestation, ComplianceLevel, ComplianceStatus, ContractVersion, CriterionStatus,
-    DexConfig, Dispute, DisputeStatus, EscrowAccount, EscrowLifecycleState, EscrowMode,
-    EscrowState, FeeRecord, FunderLedger, Grant, GrantCategory, GrantFund, GrantStatus, GrantTag,
-    HookCallResult, HookEvent, HookRegistration, InsuranceClaim, InsurancePolicy, MigrationRecord,
-    Milestone, MilestoneState, MilestoneSubmission, MultisigProposal, MultisigSigner, OracleConfig,
-    PauseRecord, PaymentStream, PriceQuote, ProtocolConfig, ProtocolMetrics, ProtocolModule,
-    QuadraticVoteRecord, RegistryEntry, RegistryEntryType, RelayAllowance, RelayConfig,
-    RelayRecord, RelayableAction, RenewalProposal, RenewalStatus, ReputationTier,
-    ReviewerAvailability, ReviewerProfile, ReviewerRequest, ReviewerRequestStatus, ScoreResult,
-    ScoringDimension, ScoringRubric, ScoringWeight, SignatureStatus, SwapResult, SwapRoute,
-    TokenMetric, VoiceCredits, VotingMechanism,
+    BadgeCriteria, BadgeRecord, BadgeType, ContractError, ContributorProfile, Delegation,
+    DelegationScope, Grant, GrantFund, GrantStatus, Milestone, MilestoneState, RefundCalculation,
+    RefundPolicy, RefundPolicyType, SnapshotTrigger, StateSnapshot,
 };
 
-use metrics::MetricField;
-use soroban_sdk::{contract, contractimpl, Address, Bytes, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 
 #[contract]
 pub struct StellarGrantsContract;
 
 #[contractimpl]
 impl StellarGrantsContract {
-    /// Initialize the contract and record the initial contract version.
-    pub fn initialize(env: Env, deployer: Address) -> Result<(), ContractError> {
-        deployer.require_auth();
-        migration::initialize_version(&env, &deployer, 1, 0, 0)?;
-        Ok(())
-    }
+    pub fn initialize(_env: Env) -> Result<(), ContractError> { Ok(()) }
 
-    /// Configure or rotate a single global admin address.
-    /// Once DAO mode is enabled, admin rotation must go through a passed
-    /// `DaoProposalType::ChangeAdmin` proposal instead of this direct call.
-    pub fn set_global_admin(
-        env: Env,
-        caller: Address,
-        new_admin: Address,
-    ) -> Result<(), ContractError> {
-        caller.require_auth();
-        dao::require_dao_mode_disabled(&env)?;
-        if let Some(current_admin) = Storage::get_global_admin(&env) {
-            if current_admin != caller {
-                return Err(ContractError::Unauthorized);
-            }
-        }
-        Storage::set_global_admin(&env, &new_admin);
-        Ok(())
-    }
-
-    /// Allows a grant developer/owner to create a new milestone-based grant.
-    #[allow(clippy::too_many_arguments)]
-    pub fn grant_create(
-        env: Env,
-        owner: Address,
-        title: String,
-        description: String,
-        token: Address,
-        total_amount: i128,
-        milestone_amount: i128,
-        num_milestones: u32,
-        reviewers: soroban_sdk::Vec<Address>,
-    ) -> Result<u64, ContractError> {
-        emergency::require_not_paused(&env)?;
-        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+    pub fn grant_create(env: Env, owner: Address, title: String, description: String, token: Address, total_amount: i128, milestone_amount: i128, num_milestones: u32, reviewers: Vec<Address>) -> Result<u64, ContractError> {
         owner.require_auth();
-
-        if total_amount <= 0 || milestone_amount <= 0 {
-            return Err(ContractError::ZeroAmount);
-        }
-
-        let protocol_cfg = config::get_config(&env);
-
-        if num_milestones == 0 || num_milestones > protocol_cfg.max_milestones_per_grant {
-            return Err(ContractError::InvalidInput);
-        }
-
-        if reviewers.len() > protocol_cfg.max_reviewers {
-            return Err(ContractError::ReviewerLimitExceeded);
-        }
-
-        let total_required = milestone_amount
-            .checked_mul(num_milestones as i128)
-            .ok_or(ContractError::InvalidInput)?;
-
-        if total_amount < total_required {
-            return Err(ContractError::InvalidInput);
-        }
-
+        if total_amount <= 0 || milestone_amount <= 0 || num_milestones == 0 || num_milestones > 100 { return Err(ContractError::InvalidInput); }
+        let required = milestone_amount.checked_mul(num_milestones as i128).ok_or(ContractError::InvalidInput)?;
+        if total_amount < required { return Err(ContractError::InvalidInput); }
         let grant_id = Storage::increment_grant_counter(&env);
-
-        let grant = Grant {
-            id: grant_id,
-            owner: owner.clone(),
-            title: title.clone(),
-            description,
-            token: token.clone(),
-            status: GrantStatus::Active,
-            total_amount,
-            milestone_amount,
-            reviewers,
-            total_milestones: num_milestones,
-            milestones_paid_out: 0,
-            escrow_balance: 0,
-            funders: soroban_sdk::Vec::new(&env),
-            reason: None,
-            timestamp: env.ledger().timestamp(),
-            require_compliance: None,
-        };
-
+        let grant = Grant { id: grant_id, owner: owner.clone(), title: title.clone(), description, token, status: GrantStatus::Active, total_amount, milestone_amount, reviewers, total_milestones: num_milestones, milestones_paid_out: 0, escrow_balance: 0, funders: Vec::new(&env), reason: None, timestamp: env.ledger().timestamp() };
         Storage::set_grant(&env, grant_id, &grant);
-        Storage::set_escrow_state(
-            &env,
-            grant_id,
-            &EscrowState {
-                mode: EscrowMode::Standard,
-                lifecycle: EscrowLifecycleState::Funding,
-                quorum_ready: false,
-                approvals_count: 0,
-            },
-        );
-        Storage::set_multisig_signers(&env, grant_id, &soroban_sdk::Vec::new(&env));
-
-        escrow::open(&env, grant_id, &owner, &token)?;
-
-        Events::emit_grant_created(&env, grant_id, owner.clone(), title, total_amount);
-
-        audit::log(
-            &env,
-            grant_id,
-            AuditAction::GrantCreated,
-            &owner,
-            None,
-            Some(total_amount),
-        );
-
-        metrics::increment(&env, MetricField::GrantsCreated, 1);
-        metrics::increment(&env, MetricField::GrantsActive, 1);
-
-        if hooks::has_hooks(&env, HookEvent::GrantCreated) {
-            hooks::trigger(&env, HookEvent::GrantCreated, Bytes::new(&env));
-        }
-
+        Events::emit_grant_created(&env, grant_id, owner, title, total_amount);
         Ok(grant_id)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn grant_create_high_security(
-        env: Env,
-        owner: Address,
-        title: String,
-        description: String,
-        token: Address,
-        total_amount: i128,
-        milestone_amount: i128,
-        num_milestones: u32,
-        reviewers: soroban_sdk::Vec<Address>,
-        multisig_signers: soroban_sdk::Vec<Address>,
-    ) -> Result<u64, ContractError> {
-        if multisig_signers.is_empty() {
-            return Err(ContractError::InvalidInput);
-        }
-
-        let grant_id = Self::grant_create(
-            env.clone(),
-            owner,
-            title,
-            description,
-            token,
-            total_amount,
-            milestone_amount,
-            num_milestones,
-            reviewers,
-        )?;
-
-        Storage::set_escrow_state(
-            &env,
-            grant_id,
-            &EscrowState {
-                mode: EscrowMode::HighSecurity,
-                lifecycle: EscrowLifecycleState::Funding,
-                quorum_ready: false,
-                approvals_count: 0,
-            },
-        );
-        Storage::set_multisig_signers(&env, grant_id, &multisig_signers);
-
-        Ok(grant_id)
-    }
-
-    /// Register a contributor profile on-chain and add to global registry.
-    pub fn contributor_register(
-        env: Env,
-        contributor: Address,
-        name: String,
-        bio: String,
-        skills: soroban_sdk::Vec<String>,
-        github_url: String,
-    ) -> Result<(), ContractError> {
+    pub fn contributor_register(env: Env, contributor: Address, name: String, bio: String, skills: Vec<String>, github_url: String) -> Result<(), ContractError> {
         contributor.require_auth();
-
-        if name.is_empty() || name.len() > constants::MAX_TITLE_LEN {
-            return Err(ContractError::InvalidInput);
-        }
-        if bio.len() > constants::MAX_BIO_LEN {
-            return Err(ContractError::InvalidInput);
-        }
-
-        if Storage::get_contributor(&env, contributor.clone()).is_some() {
-            return Err(ContractError::AlreadyRegistered);
-        }
-
-        let profile = crate::types::ContributorProfile {
-            contributor: contributor.clone(),
-            name: name.clone(),
-            bio,
-            skills,
-            github_url,
-            registration_timestamp: env.ledger().timestamp(),
-            reputation_score: 0,
-            grants_count: 0,
-            total_earned: 0,
-            milestones_completed: 0,
-            milestones_rejected: 0,
-        };
-
+        if name.is_empty() || name.len() > 100 || bio.len() > 500 { return Err(ContractError::InvalidInput); }
+        if Storage::get_contributor(&env, contributor.clone()).is_some() { return Err(ContractError::AlreadyRegistered); }
+        let profile = ContributorProfile { contributor: contributor.clone(), name: name.clone(), bio, skills, github_url, registration_timestamp: env.ledger().timestamp(), grants_count: 0, total_earned: 0, reputation_score: 0, milestones_completed: 0, milestones_rejected: 0 };
         Storage::set_contributor(&env, contributor.clone(), &profile);
-
-        // Register in global index and emit contributor_registered event
-        registry::register_contributor(&env, &contributor, &name)?;
-
-        metrics::increment(&env, MetricField::ContributorsRegistered, 1);
-
+        Events::emit_contributor_registered(&env, contributor, name);
         Ok(())
     }
 
-    /// Cancel a grant and refund remaining balance to funders
-    pub fn grant_cancel(
-        env: Env,
-        grant_id: u64,
-        owner: Address,
-        reason: String,
-    ) -> Result<(), ContractError> {
-        Self::cancel_grant(env, grant_id, owner, reason)
+    pub fn grant_cancel(env: Env, grant_id: u64, owner: Address, reason: String) -> Result<(), ContractError> {
+        owner.require_auth();
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.owner != owner { return Err(ContractError::Unauthorized); }
+        if grant.status != GrantStatus::Active || grant.milestones_paid_out >= grant.total_milestones { return Err(ContractError::InvalidState); }
+        let calc = refund::execute_refund(&env, grant_id, &owner)?;
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        grant.status = GrantStatus::Cancelled;
+        grant.escrow_balance = 0;
+        grant.reason = Some(reason.clone());
+        grant.timestamp = env.ledger().timestamp();
+        Storage::set_grant(&env, grant_id, &grant);
+        Events::emit_grant_cancelled(&env, grant_id, owner, reason, calc.funder_refund);
+        Ok(())
     }
 
-    /// Cancel a grant and refund escrowed funds. Callable by grant owner or global admin.
-    pub fn cancel_grant(
-        env: Env,
-        grant_id: u64,
-        caller: Address,
-        reason: String,
-    ) -> Result<(), ContractError> {
-        caller.require_auth();
-        reentrancy::with_non_reentrant(&env, || {
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            let caller_is_owner = grant.owner == caller;
-            let caller_is_admin = Storage::get_global_admin(&env) == Some(caller.clone());
-            if !caller_is_owner && !caller_is_admin {
-                return Err(ContractError::Unauthorized);
-            }
-
-            if grant.status != GrantStatus::Active {
-                return Err(ContractError::InvalidState);
-            }
-
-            if grant.milestones_paid_out >= grant.total_milestones {
-                return Err(ContractError::InvalidState);
-            }
-
-            let total_refundable = grant.escrow_balance;
-            if total_refundable > 0 {
-                escrow::refund_all(&env, grant_id)?;
-            }
-
-            let mut grant =
-                Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-            grant.status = GrantStatus::Cancelled;
-            grant.escrow_balance = 0;
-            grant.reason = Some(reason.clone());
-            grant.timestamp = env.ledger().timestamp();
-
-            Storage::set_grant(&env, grant_id, &grant);
-
-            Events::emit_grant_cancelled(&env, grant_id, caller.clone(), reason, total_refundable);
-
-            audit::log(
-                &env,
-                grant_id,
-                AuditAction::GrantCancelled,
-                &caller,
-                None,
-                Some(total_refundable),
-            );
-
-            metrics::increment(&env, MetricField::GrantsCancelled, 1);
-            if total_refundable > 0 {
-                metrics::record_token_refund(&env, &grant.token, total_refundable);
-            }
-
-            Ok(())
-        })
-    }
-
-    /// Mark a grant as completed when all milestones are approved and refund the remaining balance
     pub fn grant_complete(env: Env, grant_id: u64) -> Result<(), ContractError> {
-        reentrancy::with_non_reentrant(&env, || {
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            if grant.status != GrantStatus::Active {
-                return Err(ContractError::InvalidState);
-            }
-
-            let mut escrow_state = Storage::get_escrow_state(&env, grant_id);
-            if escrow_state.lifecycle == EscrowLifecycleState::Released {
-                return Err(ContractError::GrantAlreadyReleased);
-            }
-
-            let _ =
-                Self::compute_total_paid_if_quorum_ready(&env, grant_id, grant.total_milestones)?;
-            escrow_state.quorum_ready = true;
-
-            if escrow_state.mode == EscrowMode::Standard {
-                Self::finalize_grant_release(&env, grant_id)?;
-                return Ok(());
-            }
-
-            escrow_state.lifecycle = EscrowLifecycleState::AwaitingMultisig;
-            Storage::set_escrow_state(&env, grant_id, &escrow_state);
-            Ok(())
-        })
-    }
-
-    pub fn sign_release(env: Env, grant_id: u64, signer: Address) -> Result<(), ContractError> {
-        signer.require_auth();
-        reentrancy::with_non_reentrant(&env, || {
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-            if grant.status != GrantStatus::Active {
-                return Err(ContractError::InvalidState);
-            }
-
-            let mut escrow_state = Storage::get_escrow_state(&env, grant_id);
-            if escrow_state.mode != EscrowMode::HighSecurity {
-                return Err(ContractError::InvalidState);
-            }
-            if escrow_state.lifecycle == EscrowLifecycleState::Released {
-                return Err(ContractError::GrantAlreadyReleased);
-            }
-
-            let signers = Storage::get_multisig_signers(&env, grant_id);
-            if !signers.contains(signer.clone()) {
-                return Err(ContractError::NotMultisigSigner);
-            }
-            if Storage::has_release_approval(&env, grant_id, &signer) {
-                return Err(ContractError::AlreadySignedRelease);
-            }
-
-            Storage::set_release_approval(&env, grant_id, &signer, true);
-            escrow_state.approvals_count += 1;
-            Storage::set_escrow_state(&env, grant_id, &escrow_state);
-
-            let approvals_complete = escrow_state.approvals_count >= signers.len();
-            if approvals_complete && escrow_state.quorum_ready {
-                Self::finalize_grant_release(&env, grant_id)?;
-            } else if approvals_complete {
-                escrow_state.lifecycle = EscrowLifecycleState::AwaitingMultisig;
-                Storage::set_escrow_state(&env, grant_id, &escrow_state);
-            }
-
-            Ok(())
-        })
-    }
-
-    fn compute_total_paid_if_quorum_ready(
-        env: &Env,
-        grant_id: u64,
-        total_milestones: u32,
-    ) -> Result<i128, ContractError> {
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.status != GrantStatus::Active { return Err(ContractError::InvalidState); }
         let mut total_paid: i128 = 0;
-        let mut approved_count = 0;
-        for milestone_idx in 0..total_milestones {
-            if let Some(milestone) = Storage::get_milestone(env, grant_id, milestone_idx) {
-                if milestone.state != MilestoneState::Approved {
-                    return Err(ContractError::NotAllMilestonesApproved);
-                }
-                total_paid += milestone.amount;
-                approved_count += 1;
-            } else {
-                return Err(ContractError::NotAllMilestonesApproved);
-            }
+        for idx in 0..grant.total_milestones {
+            let m = Storage::get_milestone(&env, grant_id, idx).ok_or(ContractError::NotAllMilestonesApproved)?;
+            if m.state != MilestoneState::Approved { return Err(ContractError::NotAllMilestonesApproved); }
+            total_paid = total_paid.saturating_add(m.amount);
         }
-        if approved_count != total_milestones {
-            return Err(ContractError::NotAllMilestonesApproved);
-        }
-        Ok(total_paid)
-    }
-
-    fn finalize_grant_release(env: &Env, grant_id: u64) -> Result<(), ContractError> {
-        let grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        // Compliance gate: if the grant requires KYC, check the owner/contributor.
-        if let Some(required_level) = grant.require_compliance {
-            compliance::require_compliant_u32(env, &grant.owner, required_level)?;
-        }
-
-        let total_paid =
-            Self::compute_total_paid_if_quorum_ready(env, grant_id, grant.total_milestones)?;
-        if grant.escrow_balance < total_paid {
-            return Err(ContractError::InvalidInput);
-        }
-        let remaining_balance = grant.escrow_balance - total_paid;
-
-        if total_paid > 0 {
-            escrow::release(env, grant_id, &grant.owner, total_paid)?;
-        }
-        if remaining_balance > 0 {
-            escrow::refund_all(env, grant_id)?;
-        }
-
-        // Re-load grant after escrow mutations.
-        let mut grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        let remaining = grant.escrow_balance.saturating_sub(total_paid);
+        if remaining > 0 { refund_to_funders(&env, &grant, remaining)?; }
         grant.status = GrantStatus::Completed;
         grant.escrow_balance = 0;
         grant.milestones_paid_out = grant.total_milestones;
         grant.timestamp = env.ledger().timestamp();
-        Storage::set_grant(env, grant_id, &grant);
-
-        let mut escrow_state = Storage::get_escrow_state(env, grant_id);
-        escrow_state.lifecycle = EscrowLifecycleState::Released;
-        escrow_state.quorum_ready = true;
-        Storage::set_escrow_state(env, grant_id, &escrow_state);
-
-        metrics::increment(env, MetricField::GrantsCompleted, 1);
-        metrics::update_token_locked(env, &grant.token, -total_paid);
-
-        Events::emit_grant_completed(env, grant_id, total_paid, remaining_balance);
+        Storage::set_grant(&env, grant_id, &grant);
+        Events::emit_grant_completed(&env, grant_id, total_paid, remaining);
         Ok(())
     }
 
-    /// Allows authorized reviewers to vote on submitted milestones.
-    /// Delegates all voting logic to governance::cast_vote.
-    pub fn milestone_vote(
-        env: Env,
-        grant_id: u64,
-        milestone_idx: u32,
-        reviewer: Address,
-        approve: bool,
-        feedback: Option<String>,
-    ) -> Result<bool, ContractError> {
-        emergency::require_not_paused(&env)?;
-        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+    pub fn milestone_vote(env: Env, grant_id: u64, milestone_idx: u32, reviewer: Address, approve: bool, feedback: Option<String>) -> Result<bool, ContractError> {
         reviewer.require_auth();
-
-        let mut grant = Storage::get_grant_v(&env, grant_id);
-        let mut milestone = Storage::get_milestone_v(&env, grant_id, milestone_idx);
-
-        if approve && !checklist::all_required_approved(&env, grant_id, milestone_idx) {
-            return Err(ContractError::RequiredCriteriaNotMet);
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        let mut milestone = Storage::get_milestone(&env, grant_id, milestone_idx).ok_or(ContractError::MilestoneNotSubmitted)?;
+        if milestone.state != MilestoneState::Submitted { return Err(ContractError::MilestoneNotSubmitted); }
+        let mut effective = reviewer.clone();
+        if !grant.reviewers.contains(reviewer.clone()) {
+            let resolved = delegate::resolve_delegator(&env, &reviewer, grant_id);
+            if resolved == reviewer || !grant.reviewers.contains(resolved.clone()) || !delegate::is_authorized_proxy(&env, &resolved, &reviewer, grant_id) { return Err(ContractError::Unauthorized); }
+            effective = resolved;
         }
-
-        let result = governance::cast_vote(
-            &env,
-            &mut grant,
-            &mut milestone,
-            &reviewer,
-            approve,
-            feedback,
-        )?;
-
+        if milestone.votes.contains_key(effective.clone()) { return Err(ContractError::AlreadyVoted); }
+        if let Some(ref fb) = feedback { if fb.len() > 256 { return Err(ContractError::InvalidInput); } milestone.reasons.set(effective.clone(), fb.clone()); }
+        let rep = Storage::get_reviewer_reputation(&env, effective.clone());
+        milestone.votes.set(effective.clone(), approve);
+        if approve { milestone.approvals = milestone.approvals.saturating_add(rep); } else { milestone.rejections = milestone.rejections.saturating_add(rep); }
+        let mut total_weight: u32 = 0;
+        for r in grant.reviewers.iter() { total_weight = total_weight.saturating_add(Storage::get_reviewer_reputation(&env, r)); }
+        let quorum = milestone.approvals >= (total_weight / 2) + 1;
+        if quorum {
+            milestone.state = MilestoneState::Approved;
+            milestone.status_updated_at = env.ledger().timestamp();
+            update_contributor_badges(&env, grant_id, milestone_idx, &grant, milestone.amount);
+            Events::milestone_status_changed(&env, grant_id, milestone_idx, MilestoneState::Approved);
+        }
         Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
-
-        if result.quorum_reached {
-            if result.approved {
-                Self::update_contributor_reputation(
-                    &env,
-                    grant_id,
-                    milestone_idx,
-                    &grant.owner,
-                    grant.milestone_amount,
-                );
-                audit::log(
-                    &env,
-                    grant_id,
-                    AuditAction::MilestoneApproved,
-                    &reviewer,
-                    Some(milestone_idx),
-                    Some(milestone.amount),
-                );
-                metrics::increment(&env, MetricField::MilestonesApproved, 1);
-                if hooks::has_hooks(&env, HookEvent::MilestoneApproved) {
-                    hooks::trigger(&env, HookEvent::MilestoneApproved, Bytes::new(&env));
-                }
-            } else {
-                audit::log(
-                    &env,
-                    grant_id,
-                    AuditAction::MilestoneRejected,
-                    &reviewer,
-                    Some(milestone_idx),
-                    None,
-                );
-                metrics::increment(&env, MetricField::MilestonesRejected, 1);
-            }
-        }
-
-        Ok(result.quorum_reached)
+        if effective != reviewer { delegate::consume_delegation_for_vote(&env, &effective, &reviewer, grant_id)?; }
+        Events::milestone_voted(&env, grant_id, milestone_idx, reviewer, approve, feedback);
+        Ok(quorum)
     }
 
-    /// Allows authorized reviewers to reject milestones with a reason.
-    pub fn milestone_reject(
-        env: Env,
-        grant_id: u64,
-        milestone_idx: u32,
-        reviewer: Address,
-        reason: String,
-    ) -> Result<bool, ContractError> {
-        emergency::require_not_paused(&env)?;
-        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+    pub fn milestone_reject(env: Env, grant_id: u64, milestone_idx: u32, reviewer: Address, reason: String) -> Result<bool, ContractError> {
         reviewer.require_auth();
-
-        let grant = Storage::get_grant_v(&env, grant_id);
-        let mut milestone = Storage::get_milestone_v(&env, grant_id, milestone_idx);
-
-        if milestone.state != MilestoneState::Submitted {
-            env.panic_with_error(ContractError::MilestoneNotSubmitted);
-        }
-
-        if !grant.reviewers.contains(reviewer.clone()) {
-            env.panic_with_error(ContractError::Unauthorized);
-        }
-
-        if milestone.votes.contains_key(reviewer.clone()) {
-            env.panic_with_error(ContractError::AlreadyVoted);
-        }
-
-        let reputation = Storage::get_reviewer_reputation(&env, reviewer.clone());
+        if reason.len() > 256 { return Err(ContractError::InvalidInput); }
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        let mut milestone = Storage::get_milestone(&env, grant_id, milestone_idx).ok_or(ContractError::MilestoneNotSubmitted)?;
+        if milestone.state != MilestoneState::Submitted { return Err(ContractError::MilestoneNotSubmitted); }
+        if !grant.reviewers.contains(reviewer.clone()) { return Err(ContractError::Unauthorized); }
+        if milestone.votes.contains_key(reviewer.clone()) { return Err(ContractError::AlreadyVoted); }
+        let rep = Storage::get_reviewer_reputation(&env, reviewer.clone());
         milestone.votes.set(reviewer.clone(), false);
-        milestone.rejections += reputation;
+        milestone.rejections = milestone.rejections.saturating_add(rep);
         milestone.reasons.set(reviewer.clone(), reason.clone());
-
         let mut total_weight: u32 = 0;
-        for r in grant.reviewers.iter() {
-            total_weight += Storage::get_reviewer_reputation(&env, r);
-        }
-
-        let majority_threshold = (total_weight / 2) + 1;
-        let majority_rejected = milestone.rejections >= majority_threshold;
-
-        if majority_rejected {
-            milestone.state = MilestoneState::Rejected;
-            milestone.status_updated_at = env.ledger().timestamp();
-
-            for (voter, voted_approve) in milestone.votes.iter() {
-                if !voted_approve {
-                    let mut rep = Storage::get_reviewer_reputation(&env, voter.clone());
-                    rep += 1;
-                    Storage::set_reviewer_reputation(&env, voter.clone(), rep);
-                }
-            }
-
-            Events::milestone_status_changed(
-                &env,
-                grant_id,
-                milestone_idx,
-                MilestoneState::Rejected,
-            );
-        }
-
+        for r in grant.reviewers.iter() { total_weight = total_weight.saturating_add(Storage::get_reviewer_reputation(&env, r)); }
+        let rejected = milestone.rejections >= (total_weight / 2) + 1;
+        if rejected { milestone.state = MilestoneState::Rejected; milestone.status_updated_at = env.ledger().timestamp(); Events::milestone_status_changed(&env, grant_id, milestone_idx, MilestoneState::Rejected); }
         Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
         Events::milestone_rejected(&env, grant_id, milestone_idx, reviewer, reason);
-
-        Ok(majority_rejected)
+        Ok(rejected)
     }
 
-    /// Allows a grant recipient to submit a completed milestone for reviewer evaluation.
-    pub fn milestone_submit(
-        env: Env,
-        grant_id: u64,
-        milestone_idx: u32,
-        recipient: Address,
-        description: String,
-        proof_url: String,
-    ) -> Result<(), ContractError> {
-        emergency::require_not_paused(&env)?;
-        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+    pub fn milestone_submit(env: Env, grant_id: u64, milestone_idx: u32, recipient: Address, description: String, proof_url: String) -> Result<(), ContractError> {
         recipient.require_auth();
-
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        if grant.owner != recipient {
-            return Err(ContractError::Unauthorized);
-        }
-
-        apply_milestone_submission(
-            &env,
-            grant_id,
-            &grant,
-            milestone_idx,
-            description,
-            proof_url,
-            &recipient,
-        )
-    }
-
-    /// Submits multiple milestones in one transaction.
-    pub fn milestone_submit_batch(
-        env: Env,
-        grant_id: u64,
-        recipient: Address,
-        submissions: Vec<MilestoneSubmission>,
-    ) -> Result<(), ContractError> {
-        emergency::require_not_paused(&env)?;
-        recipient.require_auth();
-
-        let batch_len = submissions.len();
-        if batch_len == 0 {
-            return Err(ContractError::BatchEmpty);
-        }
-        if batch_len > constants::MAX_BATCH_SIZE {
-            return Err(ContractError::BatchTooLarge);
-        }
-
-        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
-        if grant.owner != recipient {
-            return Err(ContractError::Unauthorized);
-        }
-
-        for sub in submissions.iter() {
-            apply_milestone_submission(
-                &env,
-                grant_id,
-                &grant,
-                sub.idx,
-                sub.description.clone(),
-                sub.proof.clone(),
-                &recipient,
-            )?;
-        }
-
+        if grant.status != GrantStatus::Active { return Err(ContractError::InvalidState); }
+        if milestone_idx >= grant.total_milestones { return Err(ContractError::InvalidInput); }
+        if grant.owner != recipient { return Err(ContractError::Unauthorized); }
+        if let Some(existing) = Storage::get_milestone(&env, grant_id, milestone_idx) { if existing.state == MilestoneState::Submitted || existing.state == MilestoneState::Approved { return Err(ContractError::MilestoneAlreadySubmitted); } }
+        let milestone = Milestone { idx: milestone_idx, description: description.clone(), amount: grant.milestone_amount, state: MilestoneState::Submitted, votes: soroban_sdk::Map::new(&env), approvals: 0, rejections: 0, reasons: soroban_sdk::Map::new(&env), status_updated_at: 0, proof_url: Some(proof_url), submission_timestamp: env.ledger().timestamp() };
+        Storage::set_milestone(&env, grant_id, milestone_idx, &milestone);
+        Events::emit_milestone_submitted(&env, grant_id, milestone_idx, description);
         Ok(())
     }
 
-    /// Allows a funder to deposit tokens into escrow for a specific grant.
-    pub fn grant_fund(
-        env: Env,
-        grant_id: u64,
-        funder: Address,
-        amount: i128,
-    ) -> Result<(), ContractError> {
-        emergency::require_not_paused(&env)?;
-        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+    pub fn grant_fund(env: Env, grant_id: u64, funder: Address, amount: i128) -> Result<(), ContractError> {
         funder.require_auth();
-        reentrancy::with_non_reentrant(&env, || {
-            if amount <= 0 {
-                return Err(ContractError::ZeroAmount);
-            }
-
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            if grant.status != GrantStatus::Active {
-                return Err(ContractError::InvalidState);
-            }
-
-            escrow::deposit(&env, grant_id, &funder, amount)?;
-
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            Events::emit_grant_funded(&env, grant_id, funder.clone(), amount, grant.escrow_balance);
-
-            audit::log(
-                &env,
-                grant_id,
-                AuditAction::GrantFunded,
-                &funder,
-                None,
-                Some(amount),
-            );
-
-            metrics::update_token_locked(&env, &grant.token, amount);
-
-            Ok(())
-        })
-    }
-
-    /// Retrieve a grant by its ID
-    pub fn get_grant(env: Env, grant_id: u64) -> Result<Grant, ContractError> {
-        Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)
-    }
-
-    /// Paginated list of all grants, ordered by ascending grant ID.
-    pub fn get_grants_page(env: Env, offset: u32, limit: u32) -> Vec<Grant> {
-        let total = Storage::get_grant_count(&env);
-        let mut all: Vec<Grant> = Vec::new(&env);
-        let mut id: u64 = 1;
-        while id <= total {
-            if let Some(grant) = Storage::get_grant(&env, id) {
-                all.push_back(grant);
-            }
-            id += 1;
-        }
-        pagination::paginate(&env, &all, offset, limit)
-    }
-
-    pub fn get_milestone(
-        env: Env,
-        grant_id: u64,
-        milestone_idx: u32,
-    ) -> Result<Milestone, ContractError> {
-        let grant = Storage::get_grant_v(&env, grant_id);
-
-        if milestone_idx >= grant.total_milestones {
-            env.panic_with_error(ContractError::MilestoneIndexOutOfBounds);
-        }
-
-        let milestone = Storage::get_milestone_v(&env, grant_id, milestone_idx);
-        Ok(milestone)
-    }
-
-    /// Retrieve all reviewer feedback for a milestone
-    pub fn get_milestone_feedback(
-        env: Env,
-        grant_id: u64,
-        milestone_idx: u32,
-    ) -> Result<soroban_sdk::Map<Address, String>, ContractError> {
-        let milestone = Self::get_milestone(env, grant_id, milestone_idx)?;
-        Ok(milestone.reasons)
-    }
-
-    /// Return the full immutable audit log for a grant.
-    pub fn get_audit_log(env: Env, grant_id: u64) -> Vec<AuditEntry> {
-        audit::get_log(&env, grant_id)
-    }
-
-    // ── Contract Version Query (#527) ───────────────────────────────────
-
-    /// Query the stored contract version.
-    pub fn get_contract_version(env: Env) -> Option<ContractVersion> {
-        migration::get_version(&env)
-    }
-
-    /// Run a versioned schema migration. Admin only.
-    pub fn run_migration(
-        env: Env,
-        admin: Address,
-        target_version: ContractVersion,
-    ) -> Result<MigrationRecord, ContractError> {
-        admin.require_auth();
-        migration::run_migration(&env, &admin, target_version)
-    }
-
-    /// Return the full migration history log.
-    pub fn migration_history(env: Env) -> Vec<MigrationRecord> {
-        migration::migration_history(&env)
-    }
-
-    // ── Global Registry (#520) ──────────────────────────────────────────
-
-    /// Paginated list of all registered contributors.
-    pub fn get_contributors_page(env: Env, offset: u32, limit: u32) -> Vec<RegistryEntry> {
-        registry::get_contributors_page(&env, offset, limit)
-    }
-
-    /// Total count of registered contributors.
-    pub fn contributor_count(env: Env) -> u32 {
-        registry::contributor_count(&env)
-    }
-
-    /// Check if an address is on the approved reviewer allowlist.
-    pub fn is_approved_reviewer(env: Env, address: Address) -> bool {
-        registry::is_approved_reviewer(&env, &address)
-    }
-
-    /// Add an address to the approved reviewer allowlist. Admin only.
-    pub fn approve_reviewer(
-        env: Env,
-        admin: Address,
-        reviewer: Address,
-    ) -> Result<(), ContractError> {
-        admin.require_auth();
-        registry::approve_reviewer(&env, &admin, &reviewer)
-    }
-
-    /// Remove an address from the approved reviewer allowlist. Admin only.
-    pub fn revoke_reviewer(
-        env: Env,
-        admin: Address,
-        reviewer: Address,
-    ) -> Result<(), ContractError> {
-        admin.require_auth();
-        registry::revoke_reviewer(&env, &admin, &reviewer)
-    }
-
-    // ── Reviewer Staking (#42) ──────────────────────────────────────
-
-    /// Admin sets the minimum stake required for reviewers and the treasury address.
-    pub fn set_staking_config(
-        env: Env,
-        admin: Address,
-        min_stake: i128,
-        treasury: Address,
-    ) -> Result<(), ContractError> {
-        admin.require_auth();
-        if min_stake <= 0 {
-            return Err(ContractError::InvalidInput);
-        }
-        env.storage()
-            .persistent()
-            .set(&storage::DataKey::MinReviewerStake, &min_stake);
-        env.storage()
-            .persistent()
-            .set(&storage::DataKey::Treasury, &treasury);
+        if amount <= 0 { return Err(ContractError::InvalidInput); }
+        let mut grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.status != GrantStatus::Active { return Err(ContractError::InvalidState); }
+        token::Client::new(&env, &grant.token).transfer(&funder, &env.current_contract_address(), &amount);
+        add_fund(&mut grant, funder.clone(), amount)?;
+        Storage::set_grant(&env, grant_id, &grant);
+        Events::emit_grant_funded(&env, grant_id, funder, amount, grant.escrow_balance);
         Ok(())
     }
 
-    /// Reviewer stakes tokens to participate in a grant's review quorum.
-    pub fn stake_to_review(
-        env: Env,
-        reviewer: Address,
-        grant_id: u64,
-        amount: i128,
-    ) -> Result<(), ContractError> {
-        reviewer.require_auth();
-
+    pub fn get_grant(env: Env, grant_id: u64) -> Result<Grant, ContractError> { Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound) }
+    pub fn get_milestone(env: Env, grant_id: u64, milestone_idx: u32) -> Result<Milestone, ContractError> {
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        if grant.status != GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
+        if milestone_idx >= grant.total_milestones { return Err(ContractError::InvalidInput); }
+        Storage::get_milestone(&env, grant_id, milestone_idx).ok_or(ContractError::MilestoneNotFound)
+    }
+    pub fn get_milestone_feedback(env: Env, grant_id: u64, milestone_idx: u32) -> Result<soroban_sdk::Map<Address, String>, ContractError> { Ok(Self::get_milestone(env, grant_id, milestone_idx)?.reasons) }
 
-        let min_stake = Storage::get_min_reviewer_stake(&env);
-        if amount < min_stake {
-            return Err(ContractError::InsufficientStake);
-        }
-
-        escrow::transfer_token(
-            &env,
-            &grant.token,
-            &reviewer,
-            &env.current_contract_address(),
-            amount,
-        );
-
-        let current = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
-        Storage::set_reviewer_stake(&env, grant_id, &reviewer, current + amount);
-
+    pub fn set_staking_config(env: Env, admin: Address, min_stake: i128, treasury: Address) -> Result<(), ContractError> {
+        admin.require_auth();
+        if min_stake <= 0 { return Err(ContractError::InvalidInput); }
+        env.storage().persistent().set(&storage::DataKey::MinReviewerStake, &min_stake);
+        env.storage().persistent().set(&storage::DataKey::Treasury, &treasury);
         Ok(())
     }
-
-    /// Admin slashes a malicious reviewer's stake, sending it to treasury.
-    pub fn slash_reviewer(
-        env: Env,
-        admin: Address,
-        grant_id: u64,
-        reviewer: Address,
-    ) -> Result<(), ContractError> {
+    pub fn stake_to_review(env: Env, reviewer: Address, grant_id: u64, amount: i128) -> Result<(), ContractError> {
+        reviewer.require_auth();
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.status != GrantStatus::Active { return Err(ContractError::InvalidState); }
+        if amount < Storage::get_min_reviewer_stake(&env) { return Err(ContractError::InsufficientStake); }
+        token::Client::new(&env, &grant.token).transfer(&reviewer, &env.current_contract_address(), &amount);
+        let current = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
+        Storage::set_reviewer_stake(&env, grant_id, &reviewer, current.saturating_add(amount));
+        Ok(())
+    }
+    pub fn slash_reviewer(env: Env, admin: Address, grant_id: u64, reviewer: Address) -> Result<(), ContractError> {
         admin.require_auth();
-
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
         let stake = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
-        if stake <= 0 {
-            return Err(ContractError::StakeNotFound);
-        }
-
+        if stake <= 0 { return Err(ContractError::StakeNotFound); }
         let treasury = Storage::get_treasury(&env).ok_or(ContractError::InvalidInput)?;
-        escrow::transfer_token(
-            &env,
-            &grant.token,
-            &env.current_contract_address(),
-            &treasury,
-            stake,
-        );
-
+        token::Client::new(&env, &grant.token).transfer(&env.current_contract_address(), &treasury, &stake);
         Storage::set_reviewer_stake(&env, grant_id, &reviewer, 0);
-
         Ok(())
     }
-
-    /// Reviewer unstakes tokens after a grant lifecycle completes.
     pub fn unstake(env: Env, reviewer: Address, grant_id: u64) -> Result<(), ContractError> {
         reviewer.require_auth();
-
         let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-        if grant.status == GrantStatus::Active {
-            return Err(ContractError::InvalidState);
-        }
-
+        if grant.status == GrantStatus::Active { return Err(ContractError::InvalidState); }
         let stake = Storage::get_reviewer_stake(&env, grant_id, &reviewer);
-        if stake <= 0 {
-            return Err(ContractError::StakeNotFound);
-        }
-
-        escrow::transfer_token(
-            &env,
-            &grant.token,
-            &env.current_contract_address(),
-            &reviewer,
-            stake,
-        );
-
+        if stake <= 0 { return Err(ContractError::StakeNotFound); }
+        token::Client::new(&env, &grant.token).transfer(&env.current_contract_address(), &reviewer, &stake);
         Storage::set_reviewer_stake(&env, grant_id, &reviewer, 0);
-
         Ok(())
     }
-
-    // ── KYC Integration (#43) ───────────────────────────────────────
-
-    /// Admin sets the identity oracle contract address for KYC verification.
-    pub fn set_identity_oracle(
-        env: Env,
-        admin: Address,
-        oracle: Address,
-    ) -> Result<(), ContractError> {
-        admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&storage::DataKey::IdentityOracle, &oracle);
-        Ok(())
-    }
-
-    // ── Emergency Pause (#521) ──────────────────────────────────────
-
-    /// Pause the contract. Global admin only.
-    pub fn pause(env: Env, admin: Address, reason: String) -> Result<(), ContractError> {
-        emergency::pause(&env, &admin, reason)
-    }
-
-    /// Unpause the contract. Global admin only.
-    pub fn unpause(env: Env, admin: Address) -> Result<(), ContractError> {
-        emergency::unpause(&env, &admin)
-    }
-
-    /// Returns true if the contract is currently paused.
-    pub fn is_paused(env: Env) -> bool {
-        emergency::is_paused(&env)
-    }
-
-    /// Return the full history of pause/unpause events.
-    pub fn pause_history(env: Env) -> Vec<PauseRecord> {
-        emergency::pause_history(&env)
-    }
-
-    // ── Bulk Funding (#44) ──────────────────────────────────────────
-
-    /// Fund multiple grants in a single transaction.
-    pub fn fund_batch(
-        env: Env,
-        funder: Address,
-        grants: Vec<(u64, i128)>,
-    ) -> Result<(), ContractError> {
+    pub fn set_identity_oracle(env: Env, admin: Address, oracle: Address) -> Result<(), ContractError> { admin.require_auth(); env.storage().persistent().set(&storage::DataKey::IdentityOracle, &oracle); Ok(()) }
+    pub fn fund_batch(env: Env, funder: Address, grants: Vec<(u64, i128)>) -> Result<(), ContractError> {
         funder.require_auth();
-
-        let batch_len = grants.len();
-        if batch_len == 0 {
-            return Err(ContractError::BatchEmpty);
-        }
-        if batch_len > constants::MAX_BATCH_SIZE {
-            return Err(ContractError::BatchTooLarge);
-        }
-
-        for item in grants.iter() {
-            let (grant_id, amount) = item;
-            if amount <= 0 {
-                return Err(ContractError::ZeroAmount);
-            }
-
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            if grant.status != GrantStatus::Active {
-                return Err(ContractError::InvalidState);
-            }
-
-            escrow::deposit(&env, grant_id, &funder, amount)?;
-
-            let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
-
-            Events::emit_grant_funded(&env, grant_id, funder.clone(), amount, grant.escrow_balance);
-            metrics::update_token_locked(&env, &grant.token, amount);
-        }
-
+        if grants.is_empty() { return Err(ContractError::BatchEmpty); }
+        if grants.len() > 20 { return Err(ContractError::BatchTooLarge); }
+        for item in grants.iter() { Self::grant_fund(env.clone(), item.0, funder.clone(), item.1)?; }
         Ok(())
     }
+
+    pub fn delegate_vote(env: Env, delegator: Address, delegate_addr: Address, scope: DelegationScope, expires_at: Option<u64>, max_uses: Option<u32>) -> Result<(), ContractError> { delegate::delegate_vote(&env, &delegator, &delegate_addr, scope, expires_at, max_uses) }
+    pub fn revoke_delegation(env: Env, delegator: Address, scope: DelegationScope) -> Result<(), ContractError> { delegate::revoke_delegation(&env, &delegator, &scope) }
+    pub fn get_delegation(env: Env, delegator: Address, scope: DelegationScope) -> Option<Delegation> { delegate::get_delegation(&env, &delegator, &scope) }
+
+    pub fn get_badges(env: Env, contributor: Address) -> Vec<BadgeRecord> { badge::get_badges(&env, &contributor) }
+    pub fn has_badge(env: Env, contributor: Address, badge_type: BadgeType) -> bool { badge::has_badge(&env, &contributor, badge_type) }
+    pub fn badge_award_count(env: Env, badge_type: BadgeType) -> u32 { badge::award_count(&env, badge_type) }
+    pub fn manual_award_badge(env: Env, admin: Address, contributor: Address, badge_type: BadgeType) -> Result<(), ContractError> { badge::manual_award(&env, &admin, &contributor, badge_type) }
+
+    pub fn set_refund_policy(env: Env, owner: Address, grant_id: u64, policy: RefundPolicy) -> Result<(), ContractError> { refund::set_policy(&env, &owner, grant_id, policy) }
+    pub fn get_refund_policy(env: Env, grant_id: u64) -> RefundPolicy { refund::get_policy(&env, grant_id) }
+    pub fn calculate_refund(env: Env, grant_id: u64, canceller: Address) -> Result<RefundCalculation, ContractError> { refund::calculate_refund(&env, grant_id, &canceller) }
+
+    pub fn dispute_raise(env: Env, grant_id: u64, milestone_idx: u32, caller: Address, reason: String) -> Result<u32, ContractError> {
+        caller.require_auth();
+        let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
+        if grant.owner != caller && !grant.reviewers.contains(caller.clone()) { return Err(ContractError::Unauthorized); }
+        if milestone_idx >= grant.total_milestones || reason.is_empty() { return Err(ContractError::InvalidInput); }
+        snapshot::capture(&env, grant_id, SnapshotTrigger::DisputeRaised, &caller)
+    }
+    pub fn capture_snapshot(env: Env, grant_id: u64, trigger: SnapshotTrigger, captured_by: Address) -> Result<u32, ContractError> { captured_by.require_auth(); snapshot::capture(&env, grant_id, trigger, &captured_by) }
+    pub fn get_snapshot(env: Env, grant_id: u64, snapshot_id: u32) -> Result<StateSnapshot, ContractError> { snapshot::get_snapshot(&env, grant_id, snapshot_id) }
+    pub fn list_snapshots(env: Env, grant_id: u64) -> Vec<StateSnapshot> { snapshot::list_snapshots(&env, grant_id) }
+    pub fn latest_snapshot(env: Env, grant_id: u64) -> Option<StateSnapshot> { snapshot::latest_snapshot(&env, grant_id) }
+    pub fn diff_snapshots(env: Env, grant_id: u64, snapshot_a: u32, snapshot_b: u32) -> Vec<soroban_sdk::Symbol> { snapshot::diff_snapshots(&env, grant_id, snapshot_a, snapshot_b) }
+}
+
+fn refund_to_funders(env: &Env, grant: &Grant, amount: i128) -> Result<(), ContractError> {
+    let mut total: i128 = 0;
+    for f in grant.funders.iter() { total = total.saturating_add(f.amount); }
+    if total <= 0 { return Ok(()); }
+    let client = token::Client::new(env, &grant.token);
+    let len = grant.funders.len();
+    let mut paid: i128 = 0;
+    for i in 0..len {
+        let f = grant.funders.get(i).ok_or(ContractError::InvalidInput)?;
+        let refund = if i + 1 == len { amount.saturating_sub(paid) } else { f.amount.saturating_mul(amount).checked_div(total).unwrap_or(0) };
+        if refund > 0 { client.transfer(&env.current_contract_address(), &f.funder, &refund); Events::emit_final_refund(env, grant.id, f.funder.clone(), refund); paid = paid.saturating_add(refund); }
+    }
+    Ok(())
+}
+
+fn add_fund(grant: &mut Grant, funder: Address, amount: i128) -> Result<(), ContractError> {
+    grant.escrow_balance = grant.escrow_balance.checked_add(amount).ok_or(ContractError::InvalidInput)?;
+    for i in 0..grant.funders.len() {
+        let mut entry = grant.funders.get(i).ok_or(ContractError::InvalidInput)?;
+        if entry.funder == funder {
+            entry.amount = entry.amount.checked_add(amount).ok_or(ContractError::InvalidInput)?;
+            grant.funders.set(i, entry);
+            return Ok(());
+        }
+    }
+    grant.funders.push_back(GrantFund { funder, amount });
+    Ok(())
+}
+
+fn update_contributor_badges(env: &Env, grant_id: u64, milestone_idx: u32, grant: &Grant, amount: i128) {
+    let contributor = grant.owner.clone();
+    let mut profile = match Storage::get_contributor(env, contributor.clone()) { Some(p) => p, None => return };
+    profile.milestones_completed = profile.milestones_completed.saturating_add(1);
+    profile.total_earned = profile.total_earned.saturating_add(amount);
+    if profile.grants_count == 0 { profile.grants_count = 1; }
+    profile.reputation_score = (profile.milestones_completed as u64).saturating_mul(100).min(1000);
+    Storage::set_contributor(env, contributor.clone(), &profile);
+    let _ = badge::try_award(env, &contributor, BadgeType::FirstMilestone, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::TenMilestones, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::FiftyMilestones, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::BronzeContributor, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::SilverContributor, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::GoldContributor, Some(grant_id), Some(milestone_idx));
+    let _ = badge::try_award(env, &contributor, BadgeType::PlatinumContributor, Some(grant_id), Some(milestone_idx));
+}
 
     // ── Streaming Payments (#531) ───────────────────────────────────────────
 

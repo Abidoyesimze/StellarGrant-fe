@@ -446,9 +446,17 @@ impl Storage {
             .set(&DataKey::Stream(stream.id), stream);
     }
 
-    // ── Quadratic Voting (#537) ───────────────────────────────────────────────
+    pub fn get_grant_count(env: &Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::GrantCounter)
+            .unwrap_or(0)
+    }
 
-    pub fn get_voice_credits(env: &Env, voter: &Address, grant_id: u64) -> Option<VoiceCredits> {
+    pub fn get_contributor(
+        env: &Env,
+        contributor: soroban_sdk::Address,
+    ) -> Option<crate::types::ContributorProfile> {
         env.storage()
             .persistent()
             .get(&DataKey::VoiceCredits(voter.clone(), grant_id))

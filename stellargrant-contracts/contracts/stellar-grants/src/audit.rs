@@ -38,7 +38,7 @@ pub fn get_recent(env: &Env, grant_id: u64, n: u32) -> Vec<AuditEntry> {
         return Vec::new(env);
     }
 
-    let start = if len > n { len - n } else { 0 };
+    let start = len.saturating_sub(n);
     pagination::paginate(env, &log, start, n)
 }
 

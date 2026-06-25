@@ -22,10 +22,10 @@ pub fn register_reviewer(
         average_turnaround_ledgers: 0,
         availability: ReviewerAvailability::Available,
         registered_at: env.ledger().timestamp(),
-        reputation_score: Storage::get_reviewer_reputation(&env, reviewer.clone()),
+        reputation_score: Storage::get_reviewer_reputation(env, reviewer.clone()),
     };
 
-    Storage::set_reviewer_profile(&env, &profile);
+    Storage::set_reviewer_profile(env, &profile);
     Ok(())
 }
 
@@ -37,10 +37,10 @@ pub fn set_availability(
     reviewer.require_auth();
 
     let mut profile =
-        Storage::get_reviewer_profile(&env, reviewer).ok_or(ContractError::InvalidState)?;
+        Storage::get_reviewer_profile(env, reviewer).ok_or(ContractError::InvalidState)?;
 
     profile.availability = availability;
-    Storage::set_reviewer_profile(&env, &profile);
+    Storage::set_reviewer_profile(env, &profile);
     Ok(())
 }
 
@@ -54,7 +54,7 @@ pub fn request_reviewer(
 ) -> Result<(), ContractError> {
     owner.require_auth();
 
-    if !Storage::has_grant(&env, grant_id) {
+    if !Storage::has_grant(env, grant_id) {
         return Err(ContractError::GrantNotFound);
     }
 
@@ -68,15 +68,15 @@ pub fn request_reviewer(
         expires_at: env.ledger().timestamp() + (ttl_ledgers as u64 * 5),
     };
 
-    Storage::set_reviewer_request(&env, &request);
+    Storage::set_reviewer_request(env, &request);
     Ok(())
 }
 
 pub fn accept_request(env: &Env, reviewer: &Address, grant_id: u64) -> Result<(), ContractError> {
     reviewer.require_auth();
 
-    let request =
-        Storage::get_reviewer_request(&env, grant_id, reviewer).ok_or(ContractError::InvalidState)?;
+    let request = Storage::get_reviewer_request(env, grant_id, reviewer)
+        .ok_or(ContractError::InvalidState)?;
 
     if request.status != ReviewerRequestStatus::Pending {
         return Err(ContractError::InvalidState);
@@ -86,27 +86,28 @@ pub fn accept_request(env: &Env, reviewer: &Address, grant_id: u64) -> Result<()
         return Err(ContractError::InvalidState);
     }
 
-    let profile = Storage::get_reviewer_profile(&env, reviewer).ok_or(ContractError::InvalidState)?;
+    let profile =
+        Storage::get_reviewer_profile(env, reviewer).ok_or(ContractError::InvalidState)?;
 
     if profile.availability != ReviewerAvailability::Available {
         return Err(ContractError::InvalidState);
     }
 
-    let mut grant = Storage::get_grant_v(&env, grant_id);
+    let mut grant = Storage::get_grant_v(env, grant_id);
     grant.reviewers.push_back(reviewer.clone());
-    Storage::set_grant(&env, grant_id, &grant);
+    Storage::set_grant(env, grant_id, &grant);
 
     let mut updated_request = request;
     updated_request.status = ReviewerRequestStatus::Accepted;
-    Storage::set_reviewer_request(&env, &updated_request);
+    Storage::set_reviewer_request(env, &updated_request);
     Ok(())
 }
 
 pub fn decline_request(env: &Env, reviewer: &Address, grant_id: u64) -> Result<(), ContractError> {
     reviewer.require_auth();
 
-    let request =
-        Storage::get_reviewer_request(&env, grant_id, reviewer).ok_or(ContractError::InvalidState)?;
+    let request = Storage::get_reviewer_request(env, grant_id, reviewer)
+        .ok_or(ContractError::InvalidState)?;
 
     if request.status != ReviewerRequestStatus::Pending {
         return Err(ContractError::InvalidState);
@@ -114,7 +115,7 @@ pub fn decline_request(env: &Env, reviewer: &Address, grant_id: u64) -> Result<(
 
     let mut updated_request = request;
     updated_request.status = ReviewerRequestStatus::Declined;
-    Storage::set_reviewer_request(&env, &updated_request);
+    Storage::set_reviewer_request(env, &updated_request);
     Ok(())
 }
 
@@ -123,9 +124,9 @@ pub fn find_by_tag(_env: &Env, _tag: &String, _limit: u32) -> Vec<ReviewerProfil
 }
 
 pub fn get_profile(env: &Env, reviewer: &Address) -> Option<ReviewerProfile> {
-    Storage::get_reviewer_profile(&env, reviewer)
+    Storage::get_reviewer_profile(env, reviewer)
 }
 
 pub fn get_request(env: &Env, grant_id: u64, reviewer: &Address) -> Option<ReviewerRequest> {
-    Storage::get_reviewer_request(&env, grant_id, reviewer)
+    Storage::get_reviewer_request(env, grant_id, reviewer)
 }

@@ -82,4 +82,21 @@ pub enum ContractError {
     SubmissionNotFound = 66,
     BountyAlreadyResolved = 67,
     NoSubmissions = 68,
+    // Token Swap (#576)
+    DexNotConfigured = 69,
+    SwapExceedsSlippage = 70,
+    SwapFailed = 71,
+    InvalidSwapRoute = 72,
+    // Checklist (#581)
+    ChecklistNotFound = 73,
+    CriterionNotFound = 74,
+    ChecklistAlreadySubmitted = 75,
+    RequiredCriteriaNotMet = 76,
+    MaxCriteriaExceeded = 77,
+    // Scoring (#589)
+    RubricNotFound = 78,
+    InvalidWeights = 79,
+    // Circuit Breaker (#594)
+    ModuleTripped = 80,
+    BreakerNotTripped = 81,
 }

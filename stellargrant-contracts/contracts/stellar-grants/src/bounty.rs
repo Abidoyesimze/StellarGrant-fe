@@ -29,7 +29,7 @@ pub fn create_bounty(
     let now = env.ledger().timestamp();
     let submission_deadline = now.saturating_add(submission_window_ledgers as u64);
 
-    token::Client::new(env, token).transfer(owner, &env.current_contract_address(), &prize_amount);
+    token::Client::new(env, token).transfer(owner, env.current_contract_address(), &prize_amount);
 
     let bounty = BountyGrant {
         id,
@@ -45,7 +45,14 @@ pub fn create_bounty(
     };
 
     Storage::set_bounty(env, &bounty);
-    Events::emit_bounty_created(env, id, owner.clone(), title, prize_amount, submission_deadline);
+    Events::emit_bounty_created(
+        env,
+        id,
+        owner.clone(),
+        title,
+        prize_amount,
+        submission_deadline,
+    );
 
     Ok(id)
 }
@@ -169,11 +176,7 @@ pub fn get_bounty(env: &Env, bounty_id: u64) -> Option<BountyGrant> {
     Storage::get_bounty(env, bounty_id)
 }
 
-pub fn get_submission(
-    env: &Env,
-    bounty_id: u64,
-    submitter: &Address,
-) -> Option<BountySubmission> {
+pub fn get_submission(env: &Env, bounty_id: u64, submitter: &Address) -> Option<BountySubmission> {
     Storage::get_bounty_submission(env, bounty_id, submitter)
 }
 
@@ -184,7 +187,7 @@ pub fn list_submitters(env: &Env, bounty_id: u64) -> Vec<Address> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
 
     fn make_bounty(env: &Env, owner: &Address, token: &Address) -> u64 {
         Storage::next_bounty_id(env);

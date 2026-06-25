@@ -51,6 +51,9 @@ pub const DEFAULT_INSURANCE_DURATION_LEDGERS: u32 = 1_000_000;
 // ── Hooks (#539) ─────────────────────────────────────────────────────────────
 pub const MAX_HOOKS_PER_EVENT: u32 = 5;
 
+// ── Checklist (#581) ─────────────────────────────────────────────────────────
+pub const MAX_CRITERIA_PER_MILESTONE: u32 = 20;
+
 // ── DAO Governance (#532) ───────────────────────────────────────────────────
 pub const DEFAULT_DAO_VOTING_PERIOD_LEDGERS: u32 = 50_400; // ~7 days
 pub const DEFAULT_DAO_QUORUM_VOTES: u64 = 3;

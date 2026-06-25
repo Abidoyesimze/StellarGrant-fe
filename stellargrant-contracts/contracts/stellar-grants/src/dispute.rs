@@ -202,7 +202,8 @@ pub fn cancel_dispute(
 mod tests {
     use super::*;
     use crate::types::{Grant, GrantFund, GrantStatus};
-    use soroban_sdk::{testutils::Address as _, Env, String, Vec};
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{Env, String, Vec};
 
     fn make_grant(env: &Env, owner: Address) -> Grant {
         Grant {
@@ -221,6 +222,7 @@ mod tests {
             funders: Vec::new(env),
             reason: None,
             timestamp: env.ledger().timestamp(),
+            require_compliance: None,
         }
     }
 

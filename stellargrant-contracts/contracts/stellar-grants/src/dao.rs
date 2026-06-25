@@ -1,7 +1,7 @@
 use soroban_sdk::{Address, Env, String};
 
 use crate::config;
-use crate::constants::{DEFAULT_DAO_VOTING_PERIOD_LEDGERS, MAX_DAO_DESCRIPTION_LEN, MAX_DAO_TITLE_LEN};
+use crate::constants::{MAX_DAO_DESCRIPTION_LEN, MAX_DAO_TITLE_LEN};
 use crate::events::Events;
 use crate::storage::Storage;
 use crate::types::{ContractError, DaoProposal, DaoProposalStatus, DaoProposalType};
@@ -72,6 +72,7 @@ pub fn create_proposal(
         votes_against: 0,
         created_at: now,
         voting_deadline,
+        executed_at: None,
     };
 
     Storage::set_dao_proposal(env, &proposal);
@@ -238,7 +239,7 @@ fn require_global_admin(env: &Env, caller: &Address) -> Result<(), ContractError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Ledger};
 
     fn setup(env: &Env) -> Address {
         let admin = Address::generate(env);

@@ -178,7 +178,7 @@ independently of this change and are out of scope here:
 
 ---
 
-Closes #976
-Closes #977
-Closes #978
-Closes #979
+Closes #1108
+Closes #1109
+Closes #1110
+Closes #1111

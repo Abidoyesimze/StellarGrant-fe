@@ -43,7 +43,7 @@
 - [ ] State machine enforcement (Active → Completed/Cancelled only)
 - [ ] Proportional refund math verified (no rounding exploits)
 - [ ] Token transfer ordering: state updated before/after external calls
-- [ ] No unbounded iteration (milestones capped at 100, batch funding at 20)
+- [ ] No unbounded iteration (milestones capped at 20, batch funding at 10)
 - [ ] Storage keys cannot collide across different data types
 - [ ] Reviewer staking prevents zero-stake voting
 - [ ] Slashed funds correctly routed to treasury (not burned)

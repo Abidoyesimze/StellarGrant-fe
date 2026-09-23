@@ -142,6 +142,8 @@ pub fn pledge(
 /// - If `total_pledged < target_amount`: marks the campaign as Failed so that
 ///   backers can call `claim_refund`.
 pub fn finalize(env: &Env, campaign_id: u64) -> Result<CrowdfundStatus, ContractError> {
+    emergency::require_not_paused(env)?;
+    circuit_breaker::require_open(env, ProtocolModule::Crowdfund)?;
     crate::reentrancy::protect(env)?;
     let mut campaign = Storage::get_crowdfund_campaign(env, campaign_id)
         .ok_or(ContractError::CrowdfundNotFound)?;
@@ -178,6 +180,8 @@ pub fn finalize(env: &Env, campaign_id: u64) -> Result<CrowdfundStatus, Contract
 /// Claim a refund after a campaign has Failed or been Cancelled.
 /// Each backer may only claim once.
 pub fn claim_refund(env: &Env, campaign_id: u64, backer: &Address) -> Result<(), ContractError> {
+    emergency::require_not_paused(env)?;
+    circuit_breaker::require_open(env, ProtocolModule::Crowdfund)?;
     crate::reentrancy::protect(env)?;
     let campaign = Storage::get_crowdfund_campaign(env, campaign_id)
         .ok_or(ContractError::CrowdfundNotFound)?;
@@ -217,6 +221,9 @@ pub fn claim_refund(env: &Env, campaign_id: u64, backer: &Address) -> Result<(),
 /// Cancel an Active campaign. Only the campaign owner may call this.
 /// After cancellation, all backers may call `claim_refund` individually.
 pub fn cancel(env: &Env, campaign_id: u64, caller: &Address) -> Result<(), ContractError> {
+    emergency::require_not_paused(env)?;
+    circuit_breaker::require_open(env, ProtocolModule::Crowdfund)?;
+
     let mut campaign = Storage::get_crowdfund_campaign(env, campaign_id)
         .ok_or(ContractError::CrowdfundNotFound)?;
 
@@ -399,5 +406,133 @@ mod tests {
 
         let backers = list_backers(&env, id);
         assert_eq!(backers.len(), 0);
+    }
+
+    // ── emergency pause / circuit breaker integration ───────────────────────
+    //
+    // These run inside a registered contract (via `env.as_contract`) rather
+    // than the direct-storage style used by the tests above, since
+    // `emergency::pause` and `circuit_breaker::trip` require `require_auth`
+    // and contract-scoped storage access.
+
+    struct PauseFixture {
+        env: Env,
+        contract_id: Address,
+        admin: Address,
+        owner: Address,
+        campaign_id: u64,
+    }
+
+    fn setup_pause_fixture() -> PauseFixture {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let admin = Address::generate(&env);
+        let owner = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        let campaign_id = env.as_contract(&contract_id, || {
+            Storage::set_global_admin(&env, &admin);
+            make_campaign(&env, &owner, &token)
+        });
+
+        PauseFixture {
+            env,
+            contract_id,
+            admin,
+            owner,
+            campaign_id,
+        }
+    }
+
+    #[test]
+    fn test_finalize_blocked_by_emergency_pause() {
+        let f = setup_pause_fixture();
+        f.env.ledger().with_mut(|l| l.timestamp += 2_000);
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            crate::emergency::pause(&f.env, &f.admin, String::from_str(&f.env, "test")).unwrap();
+            finalize(&f.env, f.campaign_id)
+        });
+        assert_eq!(result, Err(ContractError::ContractPaused));
+    }
+
+    #[test]
+    fn test_finalize_blocked_by_circuit_breaker() {
+        let f = setup_pause_fixture();
+        f.env.ledger().with_mut(|l| l.timestamp += 2_000);
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            circuit_breaker::trip(
+                &f.env,
+                &f.admin,
+                ProtocolModule::Crowdfund,
+                String::from_str(&f.env, "test"),
+                None,
+            )
+            .unwrap();
+            finalize(&f.env, f.campaign_id)
+        });
+        assert_eq!(result, Err(ContractError::ModuleTripped));
+    }
+
+    #[test]
+    fn test_claim_refund_blocked_by_emergency_pause() {
+        let f = setup_pause_fixture();
+        let backer = Address::generate(&f.env);
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            crate::emergency::pause(&f.env, &f.admin, String::from_str(&f.env, "test")).unwrap();
+            claim_refund(&f.env, f.campaign_id, &backer)
+        });
+        assert_eq!(result, Err(ContractError::ContractPaused));
+    }
+
+    #[test]
+    fn test_claim_refund_blocked_by_circuit_breaker() {
+        let f = setup_pause_fixture();
+        let backer = Address::generate(&f.env);
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            circuit_breaker::trip(
+                &f.env,
+                &f.admin,
+                ProtocolModule::Crowdfund,
+                String::from_str(&f.env, "test"),
+                None,
+            )
+            .unwrap();
+            claim_refund(&f.env, f.campaign_id, &backer)
+        });
+        assert_eq!(result, Err(ContractError::ModuleTripped));
+    }
+
+    #[test]
+    fn test_cancel_blocked_by_emergency_pause() {
+        let f = setup_pause_fixture();
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            crate::emergency::pause(&f.env, &f.admin, String::from_str(&f.env, "test")).unwrap();
+            cancel(&f.env, f.campaign_id, &f.owner)
+        });
+        assert_eq!(result, Err(ContractError::ContractPaused));
+    }
+
+    #[test]
+    fn test_cancel_blocked_by_circuit_breaker() {
+        let f = setup_pause_fixture();
+
+        let result = f.env.as_contract(&f.contract_id, || {
+            circuit_breaker::trip(
+                &f.env,
+                &f.admin,
+                ProtocolModule::Crowdfund,
+                String::from_str(&f.env, "test"),
+                None,
+            )
+            .unwrap();
+            cancel(&f.env, f.campaign_id, &f.owner)
+        });
+        assert_eq!(result, Err(ContractError::ModuleTripped));
     }
 }

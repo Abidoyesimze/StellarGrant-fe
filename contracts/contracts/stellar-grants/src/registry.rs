@@ -5,6 +5,8 @@ use crate::pagination;
 use crate::storage::Storage;
 use crate::types::{ContractError, RegistryEntry, RegistryEntryType};
 
+const MAX_ENTRIES_PER_PAGE: u32 = 500;
+
 /// Add a contributor to the global registry index. Called on registration.
 ///
 /// Does not itself check for a pre-existing entry: the `contributor_register`
@@ -18,7 +20,19 @@ pub fn register_contributor(
     address: &Address,
     name: &String,
 ) -> Result<(), ContractError> {
-    let mut index = Storage::get_contributor_index(env);
+    let page_count_key = crate::storage::DataKey::User(crate::storage::UserKey::RegistryPageCount);
+    let mut page_num: u32 = env.storage()
+        .persistent()
+        .get(&page_count_key)
+        .unwrap_or(0);
+
+    let mut page = Storage::get_contributor_index_page(env, page_num);
+
+    if page.len() >= MAX_ENTRIES_PER_PAGE {
+        page_num += 1;
+        env.storage().persistent().set(&page_count_key, &page_num);
+        page = Vec::new(env);
+    }
 
     let entry = RegistryEntry {
         address: address.clone(),
@@ -27,8 +41,8 @@ pub fn register_contributor(
         entry_type: RegistryEntryType::Contributor,
     };
 
-    index.push_back(entry);
-    Storage::set_contributor_index(env, &index);
+    page.push_back(entry);
+    Storage::set_contributor_index_page(env, page_num, &page);
 
     Events::emit_contributor_registered(env, address.clone(), name.clone());
 
@@ -96,13 +110,47 @@ pub fn is_approved_reviewer(env: &Env, address: &Address) -> bool {
 
 /// Paginated list of all registered contributor addresses.
 pub fn get_contributors_page(env: &Env, offset: u32, limit: u32) -> Vec<RegistryEntry> {
-    let index = Storage::get_contributor_index(env);
-    pagination::paginate(env, &index, offset, limit)
+    let page_count_key = crate::storage::DataKey::User(crate::storage::UserKey::RegistryPageCount);
+    let page_count: u32 = env.storage()
+        .persistent()
+        .get(&page_count_key)
+        .unwrap_or(0);
+
+    let mut result = Vec::new(env);
+    let mut entries_skipped = 0u32;
+    let mut entries_returned = 0u32;
+
+    for page_num in 0..=page_count {
+        let page = Storage::get_contributor_index_page(env, page_num);
+        for entry in page.iter() {
+            if entries_skipped < offset {
+                entries_skipped += 1;
+                continue;
+            }
+            if entries_returned >= limit {
+                return result;
+            }
+            result.push_back(entry);
+            entries_returned += 1;
+        }
+    }
+    result
 }
 
 /// Total count of registered contributors.
 pub fn contributor_count(env: &Env) -> u32 {
-    Storage::get_contributor_index(env).len()
+    let page_count_key = crate::storage::DataKey::User(crate::storage::UserKey::RegistryPageCount);
+    let page_count: u32 = env.storage()
+        .persistent()
+        .get(&page_count_key)
+        .unwrap_or(0);
+
+    let mut total = 0u32;
+    for page_num in 0..=page_count {
+        let page = Storage::get_contributor_index_page(env, page_num);
+        total = total.saturating_add(page.len());
+    }
+    total
 }
 
 fn require_global_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
@@ -346,6 +394,23 @@ mod tests {
 
         env.as_contract(&contract_id, || {
             assert_eq!(contributor_count(&env), 0);
+        });
+    }
+
+    #[test]
+    fn test_register_contributor_splits_across_pages() {
+        let (env, contract_id, _) = setup();
+        const MAX_ENTRIES_PER_PAGE: u32 = 500;
+
+        env.as_contract(&contract_id, || {
+            for _ in 0..5 {
+                let addr = Address::generate(&env);
+                register_contributor(&env, &addr, &String::from_str(&env, "Contributor")).unwrap();
+            }
+
+            assert_eq!(contributor_count(&env), 5);
+            let page = get_contributors_page(&env, 0, 10);
+            assert_eq!(page.len(), 5);
         });
     }
 }

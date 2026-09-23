@@ -231,6 +231,30 @@ pub fn migrate_storage_keys_v2(env: &Env) -> Result<(), ContractError> {
         LegacyDataKey::ContributorIndex,
         soroban_sdk::Vec<crate::types::RegistryEntry>
     ) {
+        const MAX_ENTRIES_PER_PAGE: u32 = 500;
+        let page_count_key = DataKey::User(UserKey::RegistryPageCount);
+        let mut page_num = 0u32;
+
+        for (idx, entry) in v.iter().enumerate() {
+            let page_idx = (idx as u32) / MAX_ENTRIES_PER_PAGE;
+            if page_idx > page_num {
+                page_num = page_idx;
+            }
+
+            let mut page = env.storage()
+                .persistent()
+                .get::<_, soroban_sdk::Vec<crate::types::RegistryEntry>>(&DataKey::User(UserKey::RegistryPage(page_idx)))
+                .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+            page.push_back(entry);
+            env.storage()
+                .persistent()
+                .set(&DataKey::User(UserKey::RegistryPage(page_idx)), &page);
+        }
+
+        if v.len() > 0 {
+            env.storage().persistent().set(&page_count_key, &page_num);
+        }
+
         env.storage()
             .persistent()
             .set(&DataKey::User(UserKey::RegistryIndex), &v);

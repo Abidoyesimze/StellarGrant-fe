@@ -1,30 +1,35 @@
 # Stellar Grants Contract Events
 
-## Accounting-Relevant Events
+## Exportable Grant Receipts
 
-Off-chain tools that export grant funding and payout data to CSVs or accounting
-pipelines should index the typed Soroban `#[contractevent]` events listed here.
+Issue #135 adds two receipt-oriented contract events that can be indexed by off-chain tools:
 
-Earlier revisions of this document described dedicated `PayerReceipt` and
-`PayeeReceipt` events (Issue #135) with a `recipient` / `milestone_index` payload.
-Those events were never implemented in this contract, so this guide now points at
-the real events that carry the equivalent accounting data:
+- `PayerReceipt`
+- `PayeeReceipt`
 
-- **Payer side (funding)** — `GrantFunded`, emitted from `grant_fund`:
-  - fields: `grant_id`, `funder`, `amount`, `new_balance`, `timestamp`
-- **Payee side (completion)** — `GrantCompleted`, emitted from `grant_complete`:
-  - fields: `grant_id`, `total_paid`, `remaining_balance`, `timestamp`
+Both events include metadata fields designed for accounting exports:
+
+- `grant_id`
+- `recipient`
+- `token`
+- `amount`
+- `milestone_index` (`None` for grant-level receipts)
+
+`PayerReceipt` also includes:
+
+- `memo` (optional memo passed by funder during `grant_fund`)
+
+## When Receipts Are Emitted
+
+- `PayerReceipt`: emitted on `grant_fund`.
+- `PayeeReceipt`: emitted on `milestone_payout`, and on grant completion as a final summary snapshot.
 
 ## Querying Receipts
 
 You can query contract events from Soroban RPC and filter by event type:
 
 1. Fetch contract events for the deployed contract address.
-2. Filter by the **struct name (PascalCase)** of the typed event, e.g.
-   `GrantFunded` or `GrantCompleted`. Typed `#[contractevent]` events are
-   identified by their struct name — not by snake_case aliases such as
-   `grant_funded` (see `EVENTS.md`).
-3. Parse the payload fields from the struct definition (listed above) for export.
+2. Filter for `payer_receipt` and `payee_receipt` event names.
+3. Parse payload fields (`grant_id`, `recipient`, `token`, `amount`, `milestone_index`, `memo`) for export.
 
-Because these are structured contract events, indexers can store them directly in
-tabular format for CSV or accounting pipeline exports.
+Because these are structured contract events, indexers can store them directly in tabular format for CSV or accounting pipeline exports.

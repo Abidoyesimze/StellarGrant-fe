@@ -131,6 +131,14 @@ pub fn execute_refund(
     canceller: &Address,
 ) -> Result<RefundCalculation, ContractError> {
     crate::reentrancy::protect(env)?;
+
+    // Disputes lock escrow without changing grant status — reject refunds while locked
+    // so owners/admins cannot drain escrow mid-arbitration.
+    let account = crate::escrow::get_account(env, grant_id)?;
+    if account.locked {
+        return Err(ContractError::EscrowLocked);
+    }
+
     let calc = calculate_refund(env, grant_id, canceller)?;
     let mut grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
     let client = token::Client::new(env, &grant.token);
@@ -282,5 +290,43 @@ mod tests {
         let calc = calculate_refund(&env, grant_id, &owner).unwrap();
         // Because the latest milestone deadline is in the future, funder_refund should be > 0
         assert!(calc.funder_refund > 0);
+    }
+
+    #[test]
+    fn execute_refund_rejects_when_escrow_locked() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+
+        let owner = Address::generate(&env);
+        let token = Address::generate(&env);
+        let grant_id = 42u64;
+
+        env.as_contract(&contract_id, || {
+            let grant = crate::types::Grant {
+                id: grant_id,
+                owner: owner.clone(),
+                title: String::from_str(&env, "G"),
+                description: String::from_str(&env, "D"),
+                token: token.clone(),
+                status: crate::types::GrantStatus::Active,
+                total_amount: 1_000,
+                milestone_amount: 1_000,
+                reviewers: Vec::new(&env),
+                total_milestones: 1,
+                milestones_paid_out: 0,
+                escrow_balance: 1_000,
+                funders: Vec::new(&env),
+                reason: None,
+                timestamp: env.ledger().timestamp(),
+                require_compliance: None,
+            };
+            Storage::set_grant(&env, grant_id, &grant);
+            crate::escrow::open(&env, grant_id, &owner, &token).unwrap();
+            crate::escrow::lock(&env, grant_id).unwrap();
+
+            let err = execute_refund(&env, grant_id, &owner).unwrap_err();
+            assert_eq!(err, ContractError::EscrowLocked);
+        });
     }
 }

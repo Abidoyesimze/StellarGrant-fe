@@ -853,6 +853,7 @@ impl StellarGrantsContract {
         reason: String,
     ) -> Result<bool, ContractError> {
         emergency::require_not_paused(&env)?;
+        crate::grant_pause::require_not_paused(&env, grant_id)?;
         circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
         reviewer.require_auth();
 
@@ -873,7 +874,7 @@ impl StellarGrantsContract {
 
         let reputation = Storage::get_reviewer_reputation(&env, reviewer.clone());
         milestone.votes.set(reviewer.clone(), false);
-        milestone.rejections += reputation;
+        milestone.rejections = milestone.rejections.saturating_add(reputation);
         milestone.reasons.set(reviewer.clone(), reason.clone());
 
         let total_weight = milestone.reviewer_count_snapshot;

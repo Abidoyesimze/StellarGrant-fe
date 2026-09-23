@@ -134,6 +134,31 @@ pub fn update_tags(
     }
 
     let mut tag = Storage::get_grant_tags(env, grant_id).ok_or(ContractError::InvalidState)?;
+
+    // Remove the old tags from the search index before updating, keeping the
+    // index consistent with the tag data we are about to write.
+    for old_tag in tag.freeform_tags.iter() {
+        let hash = hash_tag(env, &old_tag);
+        let index = Storage::get_tag_index(env, hash);
+        let mut filtered = Vec::new(env);
+        for idx_grant_id in index.iter() {
+            if idx_grant_id != grant_id {
+                filtered.push_back(idx_grant_id);
+            }
+        }
+        Storage::set_tag_index(env, hash, &filtered);
+    }
+
+    for tag_str in freeform_tags.iter() {
+        let hash = hash_tag(env, &tag_str);
+        let mut index = Storage::get_tag_index(env, hash);
+        let has_grant = index.iter().any(|id| id == grant_id);
+        if !has_grant {
+            index.push_back(grant_id);
+            Storage::set_tag_index(env, hash, &index);
+        }
+    }
+
     tag.freeform_tags = freeform_tags;
     Storage::set_grant_tags(env, &tag);
     Ok(())

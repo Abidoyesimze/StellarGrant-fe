@@ -255,8 +255,7 @@ mod tests {
         assert_ne!(data_a, data_b);
 
         // Same address is stable.
-        let (_, data_a_again) =
-            scope_type_and_data(&env, &SubscriptionScope::PerContributor(a));
+        let (_, data_a_again) = scope_type_and_data(&env, &SubscriptionScope::PerContributor(a));
         assert_eq!(data_a, data_a_again);
     }
 }

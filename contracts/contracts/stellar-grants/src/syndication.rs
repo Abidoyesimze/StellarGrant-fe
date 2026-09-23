@@ -67,6 +67,11 @@ pub fn join_syndicate(
         return Err(ContractError::ZeroAmount);
     }
 
+    let grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
+    if grant.status != crate::types::GrantStatus::Active {
+        return Err(ContractError::InvalidState);
+    }
+
     let mut syndicate =
         Storage::get_syndicate_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
     if syndicate.status != SyndicateStatus::Forming {
@@ -736,6 +741,27 @@ mod tests {
         assert_eq!(
             f.client
                 .try_withdraw_syndicate(&f.member_a, &GRANT_ID)
+                .unwrap_err()
+                .unwrap(),
+            ContractError::InvalidState
+        );
+    }
+
+    #[test]
+    fn test_join_syndicate_requires_active_grant() {
+        let f = setup();
+        f.env.as_contract(&f.contract_id, || {
+            let mut grant =
+                Storage::get_grant(&f.env, GRANT_ID).ok_or(ContractError::GrantNotFound).unwrap();
+            grant.status = crate::types::GrantStatus::Cancelled;
+            Storage::set_grant(&f.env, GRANT_ID, &grant);
+        });
+
+        form(&f);
+
+        assert_eq!(
+            f.client
+                .try_join_syndicate(&f.member_a, &GRANT_ID, &MIN_COMMIT)
                 .unwrap_err()
                 .unwrap(),
             ContractError::InvalidState

@@ -77,6 +77,8 @@ pub enum EscrowKey {
 pub enum UserKey {
     Profile(Address),
     RegistryIndex,
+    RegistryPageCount,
+    RegistryPage(u32),
     GrantIds(Address),
     ReviewerProfile(Address),
     ReviewerRequest(u64, Address),

@@ -323,6 +323,19 @@ impl Storage {
             .set(&DataKey::User(UserKey::RegistryIndex), index);
     }
 
+    pub fn get_contributor_index_page(env: &Env, page_num: u32) -> Vec<RegistryEntry> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::User(UserKey::RegistryPage(page_num)))
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    pub fn set_contributor_index_page(env: &Env, page_num: u32, page: &Vec<RegistryEntry>) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::User(UserKey::RegistryPage(page_num)), page);
+    }
+
     pub fn get_reviewer_allowlist(env: &Env) -> Vec<Address> {
         env.storage()
             .persistent()

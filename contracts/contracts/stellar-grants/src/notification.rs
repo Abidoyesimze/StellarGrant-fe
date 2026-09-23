@@ -1,15 +1,27 @@
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{xdr::ToXdr, Address, Bytes, Env, Vec};
 
 use crate::constants;
 use crate::errors::ContractError;
 use crate::storage::DataKey;
 use crate::types::{NotificationEvent, Subscription, SubscriptionScope};
 
-fn scope_type_and_data(scope: &SubscriptionScope) -> (u32, u128) {
+/// Compress an address into a `u128` for event topics by hashing its XDR encoding
+/// and taking the first 16 bytes. Distinct addresses map to distinct values with
+/// overwhelming probability (SHA-256 collision resistance).
+fn address_to_u128_hash(env: &Env, addr: &Address) -> u128 {
+    let hash: Bytes = env.crypto().sha256(&addr.to_xdr(env)).into();
+    let mut out: u128 = 0;
+    for i in 0..16u32 {
+        out = (out << 8) | (hash.get(i).unwrap_or(0) as u128);
+    }
+    out
+}
+
+fn scope_type_and_data(env: &Env, scope: &SubscriptionScope) -> (u32, u128) {
     match scope {
         SubscriptionScope::Global => (0, 0),
         SubscriptionScope::PerGrant(id) => (1, *id as u128),
-        SubscriptionScope::PerContributor(_addr) => (2, 0),
+        SubscriptionScope::PerContributor(addr) => (2, address_to_u128_hash(env, addr)),
         SubscriptionScope::PerTag(tag_hash) => (3, *tag_hash),
     }
 }
@@ -49,7 +61,7 @@ pub fn subscribe(
         .persistent()
         .set(&DataKey::NotifSub(subscriber.clone(), 0, 0, 0), &subs);
 
-    let (scope_type, _scope_data) = scope_type_and_data(&scope);
+    let (scope_type, _scope_data) = scope_type_and_data(env, &scope);
     let list_key = DataKey::NotifSubList(event as u32, scope_type, scope.clone());
     let mut list: Vec<Address> = env
         .storage()
@@ -90,7 +102,7 @@ pub fn unsubscribe(
         .persistent()
         .set(&DataKey::NotifSub(subscriber.clone(), 0, 0, 0), &subs);
 
-    let (scope_type, _scope_data) = scope_type_and_data(scope);
+    let (scope_type, _scope_data) = scope_type_and_data(env, scope);
     let list_key = DataKey::NotifSubList(event as u32, scope_type, scope.clone());
     let mut list: Vec<Address> = env
         .storage()
@@ -117,7 +129,7 @@ pub fn get_subscribers(
     event: NotificationEvent,
     scope: &SubscriptionScope,
 ) -> Vec<Address> {
-    let (scope_type, _scope_data) = scope_type_and_data(scope);
+    let (scope_type, _scope_data) = scope_type_and_data(env, scope);
     let list_key = DataKey::NotifSubList(event as u32, scope_type, scope.clone());
     env.storage()
         .persistent()
@@ -131,7 +143,7 @@ pub fn emit_notification(
     scope: &SubscriptionScope,
     payload: u128,
 ) {
-    let (scope_type, scope_data) = scope_type_and_data(scope);
+    let (scope_type, scope_data) = scope_type_and_data(env, scope);
     env.events().publish(
         (
             soroban_sdk::Symbol::new(env, "notification"),
@@ -223,5 +235,27 @@ mod tests {
                 Vec::from_array(&env, [subscriber_a])
             );
         });
+    }
+
+    #[test]
+    fn per_contributor_scope_data_differs_by_address() {
+        let env = Env::default();
+        let a = Address::generate(&env);
+        let b = Address::generate(&env);
+
+        let (type_a, data_a) =
+            scope_type_and_data(&env, &SubscriptionScope::PerContributor(a.clone()));
+        let (type_b, data_b) =
+            scope_type_and_data(&env, &SubscriptionScope::PerContributor(b.clone()));
+
+        assert_eq!(type_a, 2);
+        assert_eq!(type_b, 2);
+        assert_ne!(data_a, 0);
+        assert_ne!(data_b, 0);
+        assert_ne!(data_a, data_b);
+
+        // Same address is stable.
+        let (_, data_a_again) = scope_type_and_data(&env, &SubscriptionScope::PerContributor(a));
+        assert_eq!(data_a, data_a_again);
     }
 }

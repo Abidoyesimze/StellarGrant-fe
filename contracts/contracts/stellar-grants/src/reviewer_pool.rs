@@ -94,8 +94,9 @@ pub fn request_reviewer(
 ) -> Result<(), ContractError> {
     owner.require_auth();
 
-    if !Storage::has_grant(env, grant_id) {
-        return Err(ContractError::GrantNotFound);
+    let grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
+    if grant.owner != *owner {
+        return Err(ContractError::Unauthorized);
     }
 
     let request = ReviewerRequest {
@@ -374,6 +375,54 @@ mod tests {
         );
 
         assert_eq!(find(&env, &contract_id, &tag(&env, "rust"), 10).len(), 1);
+    }
+
+    #[test]
+    fn test_request_reviewer_rejects_non_owner() {
+        let (env, _contract_id, client) = setup();
+
+        let owner = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let token = Address::generate(&env);
+
+        let grant_id = client.grant_create(
+            &owner,
+            &String::from_str(&env, "Grant"),
+            &String::from_str(&env, "Desc"),
+            &token,
+            &1_000,
+            &1_000,
+            &1,
+            &vec![&env],
+        );
+
+        let reviewer = register(&env, &client, "Reviewer", vec![&env]);
+
+        assert_eq!(
+            client
+                .try_reviewer_request(
+                    &stranger,
+                    &grant_id,
+                    &reviewer,
+                    &String::from_str(&env, "please review"),
+                    &1000,
+                )
+                .unwrap_err()
+                .unwrap(),
+            ContractError::Unauthorized
+        );
+
+        // Real owner can still request.
+        client.reviewer_request(
+            &owner,
+            &grant_id,
+            &reviewer,
+            &String::from_str(&env, "please review"),
+            &1000,
+        );
+        env.as_contract(&_contract_id, || {
+            assert!(Storage::get_reviewer_request(&env, grant_id, &reviewer).is_some());
+        });
     }
 
     #[test]

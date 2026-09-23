@@ -1,7 +1,8 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
-use crate::constants::BASIS_POINTS_SCALE;
+use crate::constants::{BASIS_POINTS_SCALE, MAX_RUBRIC_WEIGHTS};
 use crate::errors::ContractError;
+use crate::events::Events;
 use crate::storage::Storage;
 use crate::types::{ScoreResult, ScoringDimension, ScoringRubric, ScoringWeight};
 
@@ -14,7 +15,7 @@ fn require_global_admin(env: &Env, admin: &Address) -> Result<(), ContractError>
 }
 
 pub fn validate_rubric(weights: &Vec<ScoringWeight>) -> Result<(), ContractError> {
-    if weights.is_empty() {
+    if weights.is_empty() || weights.len() > MAX_RUBRIC_WEIGHTS {
         return Err(ContractError::InvalidWeights);
     }
     let mut sum: u32 = 0;
@@ -42,12 +43,13 @@ pub fn define_rubric(
     let id = Storage::next_rubric_id(env);
     let rubric = ScoringRubric {
         id,
-        name,
+        name: name.clone(),
         weights,
         created_by: admin.clone(),
         created_at: env.ledger().timestamp(),
     };
     Storage::set_scoring_rubric(env, &rubric);
+    Events::emit_rubric_defined(env, id, name, admin.clone());
     Ok(id)
 }
 
@@ -57,15 +59,10 @@ pub fn get_rubric(env: &Env, rubric_id: u32) -> Result<ScoringRubric, ContractEr
 
 pub fn list_rubrics(env: &Env) -> Vec<u32> {
     let mut ids: Vec<u32> = Vec::new(env);
-    let mut i = 1;
-    loop {
+    let max_id = Storage::get_rubric_counter(env);
+    for i in 1..=max_id {
         if Storage::get_scoring_rubric(env, i).is_some() {
             ids.push_back(i);
-            i += 1;
-        } else if i > 100 {
-            break;
-        } else {
-            i += 1;
         }
     }
     ids
@@ -123,8 +120,8 @@ fn compute_dimension_score(env: &Env, contributor: &Address, dimension: &Scoring
             let profile = Storage::get_contributor(env, contributor.clone());
             match profile {
                 Some(p) => {
-                    let normalized = (p.total_earned as u64).min(1_000_000_000_000) as u32;
-                    (normalized / 1_000_000_000).min(1000)
+                    let normalized = (p.total_earned.max(0) as u64).min(1_000_000_000_000);
+                    ((normalized / 1_000_000_000) as u32).min(1000)
                 }
                 None => 0,
             }
@@ -182,15 +179,16 @@ pub fn score_contributor(
 
     for w in rubric.weights.iter() {
         let raw = compute_dimension_score(env, contributor, &w.dimension);
-        let weighted = raw
+        let effective_raw = if w.invert {
+            1000u32.saturating_sub(raw.min(1000))
+        } else {
+            raw.min(1000)
+        };
+        let score = effective_raw
             .saturating_mul(w.weight_bps)
             .checked_div(BASIS_POINTS_SCALE)
-            .unwrap_or(0);
-        let score = if w.invert {
-            1000u32.saturating_sub(weighted.min(1000))
-        } else {
-            weighted.min(1000)
-        };
+            .unwrap_or(0)
+            .min(1000);
         total_score = total_score.saturating_add(score);
         dimension_scores.push_back((w.dimension.clone(), score));
     }
@@ -244,7 +242,7 @@ pub fn rank_contributors(
 mod tests {
     use super::*;
     use crate::StellarGrantsContract;
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::testutils::{Address as _, Events};
     use soroban_sdk::Env;
 
     fn setup_admin(env: &Env, contract_id: &soroban_sdk::Address) -> Address {
@@ -410,5 +408,227 @@ mod tests {
         let ranked = env.as_contract(&contract_id, || rank_contributors(&env, contributors, id));
         assert_eq!(ranked.len(), 2);
         assert!(ranked.get(0).unwrap().total_score >= ranked.get(1).unwrap().total_score);
+    }
+
+    #[test]
+    fn test_total_earned_score_not_truncated() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+        let contributor = make_contributor(&env, &contract_id);
+        // make_contributor has total_earned = 500_000_000_000
+
+        let mut weights: Vec<ScoringWeight> = Vec::new(&env);
+        weights.push_back(ScoringWeight {
+            dimension: ScoringDimension::TotalEarned,
+            weight_bps: 10000,
+            invert: false,
+        });
+
+        let name = String::from_str(&env, "EarnedOnly");
+        let id = env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name, weights).unwrap()
+        });
+
+        let result = env.as_contract(&contract_id, || {
+            score_contributor(&env, &contributor, id).unwrap()
+        });
+        assert_eq!(result.total_score, 500);
+    }
+
+    #[test]
+    fn test_total_earned_score_capped_at_1000() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+
+        let c = Address::generate(&env);
+        let profile = crate::types::ContributorProfile {
+            contributor: c.clone(),
+            name: soroban_sdk::String::from_str(&env, "whale"),
+            bio: soroban_sdk::String::from_str(&env, "bio"),
+            skills: soroban_sdk::Vec::new(&env),
+            github_url: soroban_sdk::String::from_str(&env, "url"),
+            registration_timestamp: env.ledger().timestamp(),
+            reputation_score: 750,
+            grants_count: 5,
+            total_earned: 2_000_000_000_000,
+            milestones_completed: 8,
+            milestones_rejected: 2,
+            last_action_at: env.ledger().timestamp(),
+        };
+        env.as_contract(&contract_id, || {
+            Storage::set_contributor(&env, c.clone(), &profile);
+        });
+
+        let mut weights: Vec<ScoringWeight> = Vec::new(&env);
+        weights.push_back(ScoringWeight {
+            dimension: ScoringDimension::TotalEarned,
+            weight_bps: 10000,
+            invert: false,
+        });
+
+        let name = String::from_str(&env, "EarnedCap");
+        let id = env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name, weights).unwrap()
+        });
+
+        let result = env.as_contract(&contract_id, || score_contributor(&env, &c, id).unwrap());
+        assert_eq!(result.total_score, 1000);
+    }
+
+    #[test]
+    fn test_invert_before_weighting() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+        let contributor = make_contributor(&env, &contract_id);
+        // reputation_score = 750, so raw = 750
+
+        let mut weights: Vec<ScoringWeight> = Vec::new(&env);
+        weights.push_back(ScoringWeight {
+            dimension: ScoringDimension::ReputationScore,
+            weight_bps: 10000,
+            invert: true,
+        });
+
+        let name = String::from_str(&env, "Inverted");
+        let id = env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name, weights).unwrap()
+        });
+
+        let result = env.as_contract(&contract_id, || {
+            score_contributor(&env, &contributor, id).unwrap()
+        });
+        // effective_raw = 1000 - 750 = 250, score = 250 * 10000 / 10000 = 250
+        assert_eq!(result.total_score, 250);
+    }
+
+    #[test]
+    fn test_max_rubric_weights_boundary() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+
+        let mut weights_max: Vec<ScoringWeight> = Vec::new(&env);
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::DeliverySpeed,
+            weight_bps: 1666,
+            invert: false,
+        });
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::ApprovalRate,
+            weight_bps: 1666,
+            invert: false,
+        });
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::ReputationScore,
+            weight_bps: 1666,
+            invert: false,
+        });
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::TotalEarned,
+            weight_bps: 1666,
+            invert: false,
+        });
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::DisputeRate,
+            weight_bps: 1666,
+            invert: false,
+        });
+        weights_max.push_back(ScoringWeight {
+            dimension: ScoringDimension::ReviewerSatisfaction,
+            weight_bps: 1670,
+            invert: false,
+        });
+
+        let name = String::from_str(&env, "MaxWeights");
+        let id = env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name, weights_max).unwrap()
+        });
+        assert_eq!(id, 1);
+
+        let mut weights_exceeded: Vec<ScoringWeight> = Vec::new(&env);
+        for _ in 0..6 {
+            weights_exceeded.push_back(ScoringWeight {
+                dimension: ScoringDimension::DeliverySpeed,
+                weight_bps: 1428,
+                invert: false,
+            });
+        }
+        weights_exceeded.push_back(ScoringWeight {
+            dimension: ScoringDimension::DeliverySpeed,
+            weight_bps: 1432,
+            invert: false,
+        });
+
+        let name_exceeded = String::from_str(&env, "ExceededWeights");
+        let result = env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name_exceeded, weights_exceeded)
+        });
+        assert_eq!(result, Err(ContractError::InvalidWeights));
+    }
+
+    #[test]
+    fn test_list_rubrics_many_rubrics() {
+        let env = Env::default();
+        env.budget().reset_unlimited();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+
+        let mut weights: Vec<ScoringWeight> = Vec::new(&env);
+        weights.push_back(ScoringWeight {
+            dimension: ScoringDimension::ReputationScore,
+            weight_bps: 10000,
+            invert: false,
+        });
+
+        // Create 50 rubrics to test that list_rubrics doesn't scan indefinitely
+        for _ in 1..=50 {
+            let name = String::from_str(&env, "Rubric");
+            env.as_contract(&contract_id, || {
+                define_rubric(&env, &admin, name, weights.clone()).unwrap()
+            });
+        }
+
+        let rubric_ids = env.as_contract(&contract_id, || list_rubrics(&env));
+        assert_eq!(rubric_ids.len(), 50);
+
+        // Verify all IDs are present and in order
+        for (idx, id) in rubric_ids.iter().enumerate() {
+            assert_eq!(id, (idx + 1) as u32);
+        }
+    }
+
+    #[test]
+    fn test_define_rubric_emits_event() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(StellarGrantsContract, ());
+        let admin = setup_admin(&env, &contract_id);
+
+        let mut weights: Vec<ScoringWeight> = Vec::new(&env);
+        weights.push_back(ScoringWeight {
+            dimension: ScoringDimension::ReputationScore,
+            weight_bps: 10000,
+            invert: false,
+        });
+
+        let name = String::from_str(&env, "TestRubric");
+        env.as_contract(&contract_id, || {
+            define_rubric(&env, &admin, name.clone(), weights.clone()).unwrap();
+        });
+
+        // Verify the event was emitted
+        let events = env.events().all();
+        assert!(
+            !events.events().is_empty(),
+            "At least one event should be emitted"
+        );
     }
 }

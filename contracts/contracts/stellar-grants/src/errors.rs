@@ -183,4 +183,17 @@ pub enum ContractError {
     NotYetUnlocked = 142,
     LockupRevocationUnauthorized = 143,
     LockupAlreadyRevoked = 144,
+    // Delegation (#907)
+    DelegationChainTooLong = 145,
+    // Clawback (#909)
+    InsufficientClawbackAllowance = 146,
+    // Token swap (#576) — stub
+    SwapNotImplemented = 147,
+    // Public review (#590) — limit guard
+    TooManyPublicReviews = 148,
+    // DAO vote gate
+    DaoVoteRequired = 149,
+    BountySubmissionLimitExceeded = 150,
+    // RBAC bootstrap (#1077)
+    AlreadyInitialized = 151,
 }

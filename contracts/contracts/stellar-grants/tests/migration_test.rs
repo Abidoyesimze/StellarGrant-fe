@@ -51,15 +51,19 @@ fn test_initialize_is_idempotent() {
     env.mock_all_auths();
     let (client, deployer) = setup(&env);
 
-    // First call sets the version
+    // First call sets the version and bootstraps SuperAdmin for the deployer.
     client.initialize(&deployer);
     let v1 = client.get_contract_version().unwrap();
 
-    // Second call is a no-op; version unchanged
+    // Second call: the stored contract version stays untouched (migration
+    // version init is a no-op), but the RBAC bootstrap guard now rejects the
+    // re-run with AlreadyInitialized instead of silently re-granting
+    // SuperAdmin to a different address (see issue #1077).
     let other = <Address as TestAddress>::generate(&env);
-    client.initialize(&other);
-    let v2 = client.get_contract_version().unwrap();
+    let result = client.try_initialize(&other);
+    assert!(result.is_err());
 
+    let v2 = client.get_contract_version().unwrap();
     assert_eq!(v1.major, v2.major);
     assert_eq!(v1.minor, v2.minor);
     assert_eq!(v1.patch, v2.patch);

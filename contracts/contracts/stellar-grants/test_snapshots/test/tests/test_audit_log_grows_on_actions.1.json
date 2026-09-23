@@ -28,10 +28,20 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "AuditLog"
+                    "symbol": "Grant"
                   },
                   {
-                    "u64": "1"
+                    "vec": [
+                      {
+                        "symbol": "AuditLogPage"
+                      },
+                      {
+                        "u64": "1"
+                      },
+                      {
+                        "u32": 0
+                      }
+                    ]
                   }
                 ]
               },

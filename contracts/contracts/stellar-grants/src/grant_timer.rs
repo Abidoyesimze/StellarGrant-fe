@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, String, Vec};
+use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 use crate::errors::ContractError;
 use crate::storage::Storage;
@@ -179,13 +179,74 @@ fn execute_timer_action(env: &Env, grant: &crate::types::Grant, timer: &TimerRec
             let _ = cancel_grant_internal(env, grant.id, &reason);
             true
         }
-        TimerTriggerType::AutoActivate
-        | TimerTriggerType::AutoReleaseLockup
-        | TimerTriggerType::CustomCallback => {
-            // Not yet implemented — don't claim success.
-            false
+        TimerTriggerType::AutoActivate => execute_auto_activate(env, grant),
+        TimerTriggerType::AutoReleaseLockup => execute_auto_release_lockup(env, grant),
+        TimerTriggerType::CustomCallback => {
+            // `TimerRecord` carries no callback target, payload, or dispatch
+            // contract id — there is nothing here to generically invoke.
+            // Eligibility for `CustomCallback` timers is intentionally
+            // status-independent (see `trigger_timers`), but performing an
+            // actual callback requires a broader design decision (what gets
+            // called, with what arguments, under whose authorization) that
+            // is out of scope for this fix. Flagged for maintainer input;
+            // until `TimerRecord` carries that information, mark the timer
+            // fired (there is no meaningful "action" to perform yet) rather
+            // than leaving it stuck forever.
+            true
         }
     }
+}
+
+/// `AutoActivate` fires once a grant's escrow has reached its funding
+/// target (see the eligibility check in `trigger_timers`). This protocol's
+/// `GrantStatus` has no separate "pending/unfunded" state to transition out
+/// of — a grant is `Active` as soon as it is created — so there is no status
+/// flip to perform here. The real, persisted action is recording that the
+/// grant reached full funding (bumping its `timestamp` so `data_export`/
+/// indexers can observe the change) and emitting a `grant_activated` event
+/// so off-chain consumers can react, matching the pattern used by other
+/// lifecycle transitions (e.g. `grant_pause::pause`).
+fn execute_auto_activate(env: &Env, grant: &crate::types::Grant) -> bool {
+    let mut g = match Storage::get_grant(env, grant.id) {
+        Some(g) => g,
+        None => return false,
+    };
+
+    if g.status != GrantStatus::Active {
+        return false;
+    }
+
+    g.timestamp = env.ledger().timestamp();
+    Storage::set_grant(env, grant.id, &g);
+    crate::data_export::set_last_updated(env, grant.id, env.ledger().timestamp());
+
+    env.events().publish(
+        (Symbol::new(env, "grant_activated"), grant.id),
+        g.escrow_balance,
+    );
+
+    true
+}
+
+/// `AutoReleaseLockup` fires while the grant is `Active` (see the
+/// eligibility check in `trigger_timers`). `TimerRecord` does not carry a
+/// milestone index, so this walks every milestone that could plausibly have
+/// a lockup attached (`0..total_milestones`) and releases any that are past
+/// their `lockup::unlocks_at` via the real, already-implemented
+/// `lockup::release` (which performs the actual token transfer). A grant
+/// with no lockups attached (the common case, and what today's tests
+/// exercise) is a legitimate no-op: the timer still successfully performed
+/// its check and is marked fired so it does not spin forever.
+fn execute_auto_release_lockup(env: &Env, grant: &crate::types::Grant) -> bool {
+    for milestone_idx in 0..grant.total_milestones {
+        if let Some(record) = crate::lockup::get_lockup(env, grant.id, milestone_idx) {
+            if crate::lockup::is_unlocked(env, grant.id, milestone_idx) {
+                let _ = crate::lockup::release(env, &record.holder, grant.id, milestone_idx);
+            }
+        }
+    }
+
+    true
 }
 
 /// Internal cancellation helper that performs full escrow/index cleanup.

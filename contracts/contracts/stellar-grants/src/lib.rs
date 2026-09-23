@@ -2295,6 +2295,7 @@ impl StellarGrantsContract {
         bounty_id: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        circuit_breaker::require_open(&env, ProtocolModule::Bounty)?;
         bounty::start_review(&env, &caller, bounty_id)
     }
 
@@ -2305,6 +2306,7 @@ impl StellarGrantsContract {
         winner: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
+        circuit_breaker::require_open(&env, ProtocolModule::Bounty)?;
         bounty::select_winner(&env, &caller, bounty_id, &winner)?;
         metrics::increment(&env, MetricField::BountiesAwarded, 1);
         let bounty = bounty::get_bounty(&env, bounty_id).ok_or(ContractError::BountyNotFound)?;
@@ -2318,6 +2320,7 @@ impl StellarGrantsContract {
 
     pub fn cancel_bounty(env: Env, caller: Address, bounty_id: u64) -> Result<(), ContractError> {
         caller.require_auth();
+        circuit_breaker::require_open(&env, ProtocolModule::Bounty)?;
         let bounty = bounty::get_bounty(&env, bounty_id).ok_or(ContractError::BountyNotFound)?;
         bounty::cancel_bounty(&env, &caller, bounty_id)?;
         metrics::update_token_locked(&env, &bounty.token, -bounty.prize_amount);

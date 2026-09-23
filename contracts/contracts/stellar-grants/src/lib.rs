@@ -768,7 +768,7 @@ impl StellarGrantsContract {
                 &env,
                 notif_event,
                 &SubscriptionScope::PerGrant(grant_id),
-                reviewer_sla::milestone_sla_id(grant_id, milestone_idx) as u128,
+                ((grant_id as u128) << 32) | milestone_idx as u128,
             );
 
             if result.approved {
@@ -4942,7 +4942,7 @@ fn apply_milestone_submission(
         env,
         NotificationEvent::MilestoneSubmitted,
         &SubscriptionScope::PerGrant(grant_id),
-        reviewer_sla::milestone_sla_id(grant_id, milestone_idx) as u128,
+        ((grant_id as u128) << 32) | milestone_idx as u128,
     );
 
     // Issue #726: capture a tamper-evident state snapshot on every submission.

@@ -8,13 +8,19 @@ use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
 const PERSISTENT_TTL_THRESHOLD: u32 = 100_000;
 const PERSISTENT_TTL_EXTEND_TO: u32 = 1_000_000;
 
+/// Composite (grant_id, milestone_idx) identifier for a reviewer SLA.
+///
+/// Kept as a tuple rather than packed into a single integer so the two
+/// components never collide regardless of how large `grant_id` grows.
+pub type SlaId = (u64, u32);
+
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ReviewerSlaRecord {
     /// The reviewer whose SLA this tracks.
     pub reviewer: Address,
-    /// Milestone ID this SLA applies to.
-    pub milestone_id: u64,
+    /// (grant_id, milestone_idx) this SLA applies to.
+    pub milestone_id: SlaId,
     /// Ledger timestamp by which the reviewer must vote.
     pub deadline: u64,
     /// True once the reviewer has voted within the window.
@@ -27,7 +33,7 @@ pub struct ReviewerSlaRecord {
 #[derive(Clone)]
 pub enum SlaKey {
     /// Per-reviewer, per-milestone SLA record.
-    ReviewerSla(Address, u64),
+    ReviewerSla(Address, SlaId),
 }
 
 fn extend_ttl(env: &Env, key: &SlaKey) {
@@ -41,15 +47,12 @@ fn extend_ttl(env: &Env, key: &SlaKey) {
 }
 
 /// Compose the SLA subject id for a (grant, milestone) pair.
-///
-/// SLAs are keyed by a flat `u64`, so the grant id occupies the high 32 bits
-/// and the milestone index the low 32 bits.
-pub fn milestone_sla_id(grant_id: u64, milestone_idx: u32) -> u64 {
-    ((grant_id & 0xFFFF_FFFF) << 32) | milestone_idx as u64
+pub fn milestone_sla_id(grant_id: u64, milestone_idx: u32) -> SlaId {
+    (grant_id, milestone_idx)
 }
 
 /// Register a reviewer SLA for `milestone_id` with the given `deadline`.
-pub fn register_sla(env: &Env, reviewer: &Address, milestone_id: u64, deadline: u64) {
+pub fn register_sla(env: &Env, reviewer: &Address, milestone_id: SlaId, deadline: u64) {
     let key = SlaKey::ReviewerSla(reviewer.clone(), milestone_id);
     let record = ReviewerSlaRecord {
         reviewer: reviewer.clone(),
@@ -69,7 +72,7 @@ pub fn register_sla(env: &Env, reviewer: &Address, milestone_id: u64, deadline: 
 
 /// Mark a reviewer's SLA as fulfilled (called when they cast their vote).
 /// No-op if the SLA doesn't exist or is already resolved.
-pub fn fulfill_sla(env: &Env, reviewer: &Address, milestone_id: u64) {
+pub fn fulfill_sla(env: &Env, reviewer: &Address, milestone_id: SlaId) {
     let key = SlaKey::ReviewerSla(reviewer.clone(), milestone_id);
     extend_ttl(env, &key);
     let mut record: ReviewerSlaRecord = match env.storage().persistent().get(&key) {
@@ -86,7 +89,7 @@ pub fn fulfill_sla(env: &Env, reviewer: &Address, milestone_id: u64) {
 
 /// Check whether the SLA is breached (deadline passed, not fulfilled).
 /// Persists the breached flag and emits an event on first detection.
-pub fn check_and_mark_breach(env: &Env, reviewer: &Address, milestone_id: u64) -> bool {
+pub fn check_and_mark_breach(env: &Env, reviewer: &Address, milestone_id: SlaId) -> bool {
     let key = SlaKey::ReviewerSla(reviewer.clone(), milestone_id);
     extend_ttl(env, &key);
     let mut record: ReviewerSlaRecord = match env.storage().persistent().get(&key) {
@@ -111,7 +114,7 @@ pub fn check_and_mark_breach(env: &Env, reviewer: &Address, milestone_id: u64) -
 }
 
 /// Returns the SLA record for a reviewer / milestone pair, if it exists.
-pub fn get_sla(env: &Env, reviewer: &Address, milestone_id: u64) -> Option<ReviewerSlaRecord> {
+pub fn get_sla(env: &Env, reviewer: &Address, milestone_id: SlaId) -> Option<ReviewerSlaRecord> {
     let key = SlaKey::ReviewerSla(reviewer.clone(), milestone_id);
     extend_ttl(env, &key);
     env.storage().persistent().get(&key)
@@ -243,11 +246,22 @@ mod tests {
 
     #[test]
     fn test_milestone_sla_id_is_unique_per_grant_and_milestone() {
-        assert_eq!(milestone_sla_id(0, 0), 0);
-        assert_eq!(milestone_sla_id(0, 7), 7);
-        assert_eq!(milestone_sla_id(1, 0), 1 << 32);
+        assert_eq!(milestone_sla_id(0, 0), (0, 0));
+        assert_eq!(milestone_sla_id(0, 7), (0, 7));
+        assert_eq!(milestone_sla_id(1, 0), (1, 0));
         assert_ne!(milestone_sla_id(1, 0), milestone_sla_id(0, 1));
         assert_ne!(milestone_sla_id(2, 3), milestone_sla_id(3, 2));
+    }
+
+    #[test]
+    fn test_milestone_sla_id_does_not_collide_across_the_32_bit_boundary() {
+        // Prior to the fix, grant_id was masked to its low 32 bits before
+        // being packed into the key, so grant N and grant N + 2^32 produced
+        // the same SLA id. The composite (grant_id, milestone_idx) tuple
+        // never collides regardless of how large grant_id grows.
+        let low = milestone_sla_id(42, 3);
+        let high = milestone_sla_id(42 + (1u64 << 32), 3);
+        assert_ne!(low, high);
     }
 
     #[test]

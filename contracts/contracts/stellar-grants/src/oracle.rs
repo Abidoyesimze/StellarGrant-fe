@@ -55,7 +55,11 @@ pub fn is_price_fresh(env: &Env, quote: &PriceQuote) -> bool {
     let Ok(config) = get_oracle_config(env) else {
         return false;
     };
-    let age = env.ledger().timestamp().saturating_sub(quote.fetched_at);
+    let now = env.ledger().timestamp();
+    if quote.fetched_at > now {
+        return false;
+    }
+    let age = now - quote.fetched_at;
     age <= config.staleness_threshold
 }
 
@@ -207,6 +211,22 @@ mod tests {
             price_in_base: PRICE_SCALE,
             fetched_at: 1_000,
             is_stale: true,
+        };
+        assert!(!is_price_fresh(&env, &quote));
+    }
+
+    #[test]
+    fn test_is_price_fresh_rejects_future_fetched_at() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, base_token, _) = setup_oracle(&env);
+
+        env.ledger().set_timestamp(1_000);
+        let quote = PriceQuote {
+            token: base_token,
+            price_in_base: PRICE_SCALE,
+            fetched_at: 1_500, // in the future relative to `now`
+            is_stale: false,
         };
         assert!(!is_price_fresh(&env, &quote));
     }

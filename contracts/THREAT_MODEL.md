@@ -37,12 +37,12 @@
 **Threat**: An attacker creates a grant with maximum milestones or funds from many addresses, causing gas exhaustion during iteration (e.g., refund loops).
 
 **Mitigation**:
-- Milestones capped at 100 (`num_milestones` validation in `grant_create`)
-- Batch funding capped at 20 operations per call
+- Milestones capped at 20 (`MAX_MILESTONES_PER_GRANT` validation in `grant_create`)
+- Batch funding capped at 10 operations per call (`MAX_BATCH_SIZE`)
 - Refund loops iterate over `funders` vector which grows with each unique funder
 - Soroban CPU instruction limits provide a hard ceiling on computation
 
-**Bound analysis**: With 100 milestones × 100 funders, the maximum iteration count is bounded and well within Soroban's per-invocation CPU budget (~100M instructions).
+**Bound analysis**: With 20 milestones and an illustrative 100 unique funders (the `funders` vector has no hard-coded cap and grows with each unique funder), the worst-case refund loop is bounded by 20 × 100 = 2,000 iterations, well within Soroban's per-invocation CPU budget (~100M instructions).
 
 ---
 

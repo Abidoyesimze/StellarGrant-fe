@@ -168,6 +168,7 @@ impl StellarGrantsContract {
     pub fn initialize(env: Env, deployer: Address) -> Result<(), ContractError> {
         deployer.require_auth();
         migration::initialize_version(&env, &deployer, 1, 0, 0)?;
+        access_control::bootstrap_super_admin(&env, &deployer)?;
         Ok(())
     }
 

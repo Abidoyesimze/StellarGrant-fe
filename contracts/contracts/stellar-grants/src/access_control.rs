@@ -4,6 +4,40 @@ use crate::storage::Storage;
 use crate::types::{Role, RoleAssignment};
 use soroban_sdk::{Address, Env, Vec};
 
+/// One-time bootstrap that grants `Role::SuperAdmin` to the deployer.
+///
+/// Without this, the RBAC system is unreachable: `grant_role` requires the
+/// caller to already hold `Role::SuperAdmin` or `Role::ProtocolAdmin`, but
+/// nothing ever writes the first such assignment. This is guarded so it can
+/// only ever run once: if `Role::SuperAdmin` already has any members, it
+/// fails with `ContractError::AlreadyInitialized` instead of silently
+/// re-granting or overwriting the existing assignment.
+pub fn bootstrap_super_admin(env: &Env, deployer: &Address) -> Result<(), ContractError> {
+    if !Storage::get_role_members(env, &Role::SuperAdmin).is_empty() {
+        return Err(ContractError::AlreadyInitialized);
+    }
+
+    let assignment = RoleAssignment {
+        holder: deployer.clone(),
+        role: Role::SuperAdmin,
+        granted_by: deployer.clone(),
+        granted_at: env.ledger().timestamp(),
+        expires_at: None,
+        is_active: true,
+    };
+
+    Storage::set_role_assignment(env, deployer, &Role::SuperAdmin, &assignment);
+    Storage::set_role_members(
+        env,
+        &Role::SuperAdmin,
+        &soroban_sdk::vec![env, deployer.clone()],
+    );
+
+    Events::role_granted(env, deployer.clone(), Role::SuperAdmin, deployer.clone());
+
+    Ok(())
+}
+
 /// Grant a role to an address. SuperAdmin only (or ProtocolAdmin for lesser roles).
 pub fn grant_role(
     env: &Env,
@@ -239,6 +273,52 @@ mod tests {
             );
         });
         (env, admin, contract_id)
+    }
+
+    // ── Bootstrap (#1077) ───────────────────────────────────────────────────
+
+    #[test]
+    fn bootstrap_super_admin_via_initialize_allows_first_grant() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let deployer = Address::generate(&env);
+
+        // Fresh deploy -> initialize should bootstrap SuperAdmin for the deployer.
+        client.initialize(&deployer);
+
+        env.as_contract(&contract_id, || {
+            assert!(has_role(&env, &deployer, Role::SuperAdmin));
+
+            // The bootstrap must unblock the rest of the RBAC system: the
+            // deployer, now a SuperAdmin, can grant other roles.
+            let alice = Address::generate(&env);
+            grant_role(&env, &deployer, &alice, Role::ProtocolAdmin, None).unwrap();
+            assert!(has_role(&env, &alice, Role::ProtocolAdmin));
+        });
+    }
+
+    #[test]
+    fn bootstrap_super_admin_is_one_time_only() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let deployer = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            bootstrap_super_admin(&env, &deployer).unwrap();
+            assert!(has_role(&env, &deployer, Role::SuperAdmin));
+
+            // A second bootstrap attempt (e.g. from calling initialize again)
+            // must fail rather than silently re-granting SuperAdmin to a
+            // different address.
+            let attacker = Address::generate(&env);
+            let err = bootstrap_super_admin(&env, &attacker);
+            assert_eq!(err, Err(ContractError::AlreadyInitialized));
+            assert!(!has_role(&env, &attacker, Role::SuperAdmin));
+            assert!(has_role(&env, &deployer, Role::SuperAdmin));
+        });
     }
 
     // ── Grant role ───────────────────────────────────────────────────────

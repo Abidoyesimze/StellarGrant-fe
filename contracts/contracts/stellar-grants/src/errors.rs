@@ -194,4 +194,6 @@ pub enum ContractError {
     // DAO vote gate
     DaoVoteRequired = 149,
     BountySubmissionLimitExceeded = 150,
+    // RBAC bootstrap (#1077)
+    AlreadyInitialized = 151,
 }

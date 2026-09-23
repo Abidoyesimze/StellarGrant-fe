@@ -4847,8 +4847,10 @@ impl StellarGrantsContract {
     }
 
     /// Attempt to fire all eligible timers for a grant. Anyone can call.
-    pub fn timer_trigger(env: Env, caller: Address, grant_id: u64) -> u32 {
-        grant_timer::trigger_timers(&env, &caller, grant_id)
+    pub fn timer_trigger(env: Env, caller: Address, grant_id: u64) -> Result<u32, ContractError> {
+        emergency::require_not_paused(&env)?;
+        circuit_breaker::require_open(&env, ProtocolModule::Grants)?;
+        Ok(grant_timer::trigger_timers(&env, &caller, grant_id))
     }
 
     /// Return all timers for a grant.

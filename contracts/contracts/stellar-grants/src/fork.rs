@@ -29,6 +29,11 @@ pub fn fork_grant(
         return Err(ContractError::InvalidInput);
     }
 
+    let existing_children = Storage::get_fork_children(env, original_grant_id);
+    if existing_children.len() >= constants::MAX_FORKS_PER_GRANT {
+        return Err(ContractError::InvalidInput);
+    }
+
     let reviewers = if inherit_reviewers {
         original.reviewers.clone()
     } else {
@@ -95,7 +100,7 @@ pub fn fork_grant(
 
     Storage::set_fork_record(env, new_grant_id, &record);
 
-    let mut children: Vec<u64> = Storage::get_fork_children(env, original_grant_id);
+    let mut children = existing_children;
     if !children.contains(new_grant_id) {
         children.push_back(new_grant_id);
         Storage::set_fork_children(env, original_grant_id, &children);
@@ -145,7 +150,7 @@ pub fn is_descendant(env: &Env, ancestor_id: u64, descendant_id: u64) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::constants::MAX_FORK_DEPTH;
+    use crate::constants::{MAX_FORKS_PER_GRANT, MAX_FORK_DEPTH};
     use crate::storage::Storage;
     use crate::types::{Grant, GrantStatus};
     use crate::StellarGrantsContract;
@@ -353,6 +358,79 @@ mod test {
                 false,
             );
             assert_eq!(result, Err(ContractError::InvalidInput));
+        });
+    }
+
+    #[test]
+    #[test]
+    fn test_fork_grant_cap_per_grant() {
+        let env = Env::default();
+        let contract_id = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            setup_grant(&env, 1, &owner);
+
+            // Pre-populate the fork-children list to the cap so the test
+            // doesn't have to pay for MAX_FORKS_PER_GRANT real forks.
+            let mut children: Vec<u64> = Vec::new(&env);
+            for id in 0..MAX_FORKS_PER_GRANT {
+                children.push_back(1000 + id as u64);
+            }
+            Storage::set_fork_children(&env, 1, &children);
+
+            let caller = Address::generate(&env);
+            let result = fork_grant(
+                &env,
+                &caller,
+                1,
+                String::from_str(&env, "Fork"),
+                String::from_str(&env, "Desc"),
+                1000,
+                &token,
+                false,
+                false,
+            );
+            assert_eq!(result, Err(ContractError::InvalidInput));
+
+            let children = get_forks(&env, 1);
+            assert_eq!(children.len(), MAX_FORKS_PER_GRANT);
+        });
+    }
+
+    #[test]
+    fn test_fork_grant_allows_up_to_cap() {
+        let env = Env::default();
+        let contract_id = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            setup_grant(&env, 1, &owner);
+
+            let mut children: Vec<u64> = Vec::new(&env);
+            for id in 0..(MAX_FORKS_PER_GRANT - 1) {
+                children.push_back(1000 + id as u64);
+            }
+            Storage::set_fork_children(&env, 1, &children);
+
+            let caller = Address::generate(&env);
+            let result = fork_grant(
+                &env,
+                &caller,
+                1,
+                String::from_str(&env, "Fork"),
+                String::from_str(&env, "Desc"),
+                1000,
+                &token,
+                false,
+                false,
+            );
+            assert!(result.is_ok());
+
+            let children = get_forks(&env, 1);
+            assert_eq!(children.len(), MAX_FORKS_PER_GRANT);
         });
     }
 

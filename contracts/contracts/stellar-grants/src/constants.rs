@@ -58,6 +58,7 @@ pub const MAX_BATCH_SIZE: u32 = 10;
 
 // ── Limits ───────────────────────────────────────────────────────────────────
 pub const MAX_FORK_DEPTH: u32 = 5;
+pub const MAX_FORKS_PER_GRANT: u32 = 50;
 pub const MAX_SPLIT_RECIPIENTS: u32 = 10;
 pub const MAX_CRITERIA_PER_MILESTONE: u32 = 20;
 pub const MAX_INDEX_ENTRIES: u32 = 10_000;

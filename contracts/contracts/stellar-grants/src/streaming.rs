@@ -142,6 +142,11 @@ pub fn withdraw_stream(
         return Err(ContractError::StreamNotActive);
     }
 
+    let grant = Storage::get_grant(env, stream.grant_id).ok_or(ContractError::GrantNotFound)?;
+    if grant.status != GrantStatus::Active {
+        return Err(ContractError::InvalidState);
+    }
+
     let claimable = accrued_amount(env, &stream);
     if claimable == 0 {
         return Ok(0);
@@ -469,6 +474,25 @@ mod tests {
         });
 
         let result = client.try_create_stream(&sender, &recipient, &2, &token, &100, &100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_withdraw_stream_rejects_when_grant_cancelled() {
+        let (env, sender, recipient, token, _, cid) = setup();
+        let client = crate::StellarGrantsContractClient::new(&env, &cid);
+        let stream_id = client.create_stream(&sender, &recipient, &1, &token, &100, &100);
+
+        env.ledger().with_mut(|li| li.sequence_number += 30);
+
+        env.as_contract(&cid, || {
+            let mut grant =
+                Storage::get_grant(&env, 1).ok_or(ContractError::GrantNotFound).unwrap();
+            grant.status = GrantStatus::Cancelled;
+            Storage::set_grant(&env, 1, &grant);
+        });
+
+        let result = client.try_withdraw_stream(&recipient, &stream_id);
         assert!(result.is_err());
     }
 }

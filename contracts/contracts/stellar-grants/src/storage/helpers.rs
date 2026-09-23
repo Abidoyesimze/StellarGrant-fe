@@ -175,6 +175,11 @@ impl Storage {
         Self::bump(env, &key);
     }
 
+    pub fn remove_milestone(env: &Env, grant_id: u64, milestone_idx: u32) {
+        let key = DataKey::Milestone(MilestoneKey::Data(grant_id, milestone_idx));
+        env.storage().persistent().remove(&key);
+    }
+
     pub fn get_contributor(env: &Env, contributor: Address) -> Option<ContributorProfile> {
         let key = DataKey::User(UserKey::Profile(contributor));
         let result = env.storage().persistent().get(&key);
@@ -531,13 +536,18 @@ impl Storage {
     }
 
     pub fn get_stream(env: &Env, stream_id: u32) -> Option<PaymentStream> {
-        env.storage().persistent().get(&DataKey::Stream(stream_id))
+        let key = DataKey::Stream(stream_id);
+        let result = env.storage().persistent().get(&key);
+        if result.is_some() {
+            Self::bump(env, &key);
+        }
+        result
     }
 
     pub fn set_stream(env: &Env, stream: &PaymentStream) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Stream(stream.id), stream);
+        let key = DataKey::Stream(stream.id);
+        env.storage().persistent().set(&key, stream);
+        Self::bump(env, &key);
     }
 
     // ── Quadratic Voting (#537) ───────────────────────────────────────────────
@@ -1533,12 +1543,12 @@ impl Storage {
         grant_id: u64,
         member: &Address,
     ) -> Option<SyndicateMember> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Grant(GrantKey::SyndicateMember(
-                grant_id,
-                member.clone(),
-            )))
+        let key = DataKey::Grant(GrantKey::SyndicateMember(grant_id, member.clone()));
+        let result = env.storage().persistent().get(&key);
+        if result.is_some() {
+            Self::bump(env, &key);
+        }
+        result
     }
 
     pub fn set_syndicate_member(

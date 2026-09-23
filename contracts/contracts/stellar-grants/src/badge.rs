@@ -23,9 +23,16 @@ pub struct BadgeAwarded {
 }
 
 fn get_badges_raw(env: &Env, contributor: &Address) -> Vec<BadgeRecord> {
+    let key = BadgeKey::BadgeList(contributor.clone());
+    let exists = env.storage().persistent().has(&key);
+    if exists {
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, BADGE_TTL_THRESHOLD, BADGE_TTL_EXTEND_TO);
+    }
     env.storage()
         .persistent()
-        .get(&BadgeKey::BadgeList(contributor.clone()))
+        .get(&key)
         .unwrap_or_else(|| Vec::new(env))
 }
 

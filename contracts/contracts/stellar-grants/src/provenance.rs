@@ -19,7 +19,7 @@ pub fn record(
 ) {
     let counter_key = DataKey::Provenance(ProvenanceKey::Counter);
     let mut counter: u32 = env.storage().persistent().get(&counter_key).unwrap_or(0);
-    counter += 1;
+    counter = counter.saturating_add(1);
 
     let record_id = counter;
     let timestamp = env.ledger().timestamp();

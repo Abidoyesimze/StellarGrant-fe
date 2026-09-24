@@ -420,7 +420,12 @@ impl StellarGrantsContract {
         })
     }
 
-    /// Mark a grant as completed when all milestones are approved and refund the remaining balance
+    /// Mark a grant as completed when all milestones are approved and refund the remaining balance.
+    ///
+    /// Intentionally permissionless: anyone may call this once all milestones reach
+    /// Approved status — the approval itself is the authorization. This only applies
+    /// an already-decided change and does not redirect funds to the caller.
+    /// Matches the convention used by `crowdfund_finalize` and `dao_finalize`.
     pub fn grant_complete(env: Env, grant_id: u64) -> Result<(), ContractError> {
         reentrancy::with_non_reentrant(&env, || {
             let grant = Storage::get_grant(&env, grant_id).ok_or(ContractError::GrantNotFound)?;
@@ -2511,6 +2516,10 @@ impl StellarGrantsContract {
     /// reserved funds to the recipient and only then marks the grant
     /// Completed / zeroes escrow_balance. This is the sole path by which a
     /// multisig-gated payout can complete the grant.
+    ///
+    /// Intentionally permissionless: anyone may call this once the multisig
+    /// approval is complete. The approval itself is the authorization; this only
+    /// executes an already-decided release and does not redirect funds to the caller.
     pub fn execute_escrow_release(
         env: Env,
         grant_id: u64,
@@ -4100,6 +4109,12 @@ impl StellarGrantsContract {
         versioning::vote_amendment(&env, &reviewer, grant_id, amendment_version, approve)
     }
 
+    /// Apply an approved amendment to a grant, updating title/description/amount/milestones.
+    ///
+    /// Intentionally permissionless: anyone may call this once the amendment has reached
+    /// `AmendmentStatus::Approved` status (via quorum vote or auto-approval). The approval
+    /// itself is the authorization; this only applies an already-decided change and does
+    /// not redirect funds to the caller.
     pub fn apply_amendment(
         env: Env,
         grant_id: u64,

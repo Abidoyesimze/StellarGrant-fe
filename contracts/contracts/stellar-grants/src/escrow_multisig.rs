@@ -112,3 +112,142 @@ pub fn get_request(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<Escro
         .persistent()
         .get(&DataKey::EscrowReleaseRequest(grant_id, milestone_idx))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::ProtocolConfig;
+    use soroban_sdk::testutils::Address as _;
+
+    fn setup() -> (Env, u64) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let grant_id = 1u64;
+
+        env.as_contract(&contract_id, || {
+            let config = ProtocolConfig {
+                multisig_escrow_threshold: 2,
+                ..Default::default()
+            };
+            env.storage().persistent().set(&DataKey::Config, &config);
+        });
+
+        (env, grant_id)
+    }
+
+    #[test]
+    fn test_create_request() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let result = create_request(&env, grant_id, 0, 1000, recipient.clone());
+            assert!(result.is_ok());
+
+            let request = get_request(&env, grant_id, 0).unwrap();
+            assert_eq!(request.amount, 1000);
+            assert_eq!(request.recipient, recipient);
+            assert!(!request.executed);
+            assert_eq!(request.approvals.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_approve_accumulates() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let approver1 = Address::generate(&env);
+        let approver2 = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            create_request(&env, grant_id, 0, 1000, recipient).unwrap();
+
+            approve(&env, approver1.clone(), grant_id, 0).unwrap();
+            let request = get_request(&env, grant_id, 0).unwrap();
+            assert_eq!(request.approvals.len(), 1);
+            assert!(!is_approved(&env, grant_id, 0));
+
+            approve(&env, approver2.clone(), grant_id, 0).unwrap();
+            let request = get_request(&env, grant_id, 0).unwrap();
+            assert_eq!(request.approvals.len(), 2);
+            assert!(is_approved(&env, grant_id, 0));
+        });
+    }
+
+    #[test]
+    fn test_duplicate_approval_rejected() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let approver = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            create_request(&env, grant_id, 0, 1000, recipient).unwrap();
+
+            approve(&env, approver.clone(), grant_id, 0).unwrap();
+            let result = approve(&env, approver, grant_id, 0);
+            assert_eq!(result, Err(ContractError::AlreadyVoted));
+        });
+    }
+
+    #[test]
+    fn test_execute_before_threshold_rejected() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let approver = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            create_request(&env, grant_id, 0, 1000, recipient).unwrap();
+            approve(&env, approver, grant_id, 0).unwrap();
+
+            // Only 1 approval, threshold is 2
+            let result = execute_release(&env, grant_id, 0);
+            assert_eq!(result, Err(ContractError::Unauthorized));
+        });
+    }
+
+    #[test]
+    fn test_execute_already_executed_rejected() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let approver1 = Address::generate(&env);
+        let approver2 = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            create_request(&env, grant_id, 0, 1000, recipient).unwrap();
+            approve(&env, approver1, grant_id, 0).unwrap();
+            approve(&env, approver2, grant_id, 0).unwrap();
+
+            execute_release(&env, grant_id, 0).unwrap();
+
+            // Second execution should fail
+            let result = execute_release(&env, grant_id, 0);
+            assert_eq!(result, Err(ContractError::InvalidState));
+        });
+    }
+
+    #[test]
+    fn test_approve_after_expiry_rejected() {
+        let (env, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let approver = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            create_request(&env, grant_id, 0, 1000, recipient).unwrap();
+
+            // Advance time past expiry (2 weeks)
+            let mut ledger = env.ledger().get();
+            ledger.timestamp += SECONDS_PER_WEEK * 3;
+            env.ledger().set(ledger);
+
+            let result = approve(&env, approver, grant_id, 0);
+            assert_eq!(result, Err(ContractError::InvalidState));
+        });
+    }
+}

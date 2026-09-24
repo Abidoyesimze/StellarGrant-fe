@@ -296,4 +296,75 @@ mod test {
 
         assert_eq!(decode_grant_withdraw(&payload), Some(grant_id));
     }
+
+    #[test]
+    fn non_signer_cannot_sign() {
+        let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        env.as_contract(&contract_id, || {
+            let creator = Address::generate(&env);
+            let signer1 = Address::generate(&env);
+            let stranger = Address::generate(&env);
+            let mut signers = Vec::new(&env);
+            signers.push_back(signer1);
+
+            let id = create_proposal(&env, &creator, 1, Bytes::new(&env), signers, 1, 100).unwrap();
+
+            assert_eq!(
+                sign(&env, &stranger, id, true),
+                Err(ContractError::NotAProposalSigner)
+            );
+        });
+    }
+
+    #[test]
+    fn nonexistent_proposal_not_found() {
+        let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        env.as_contract(&contract_id, || {
+            let caller = Address::generate(&env);
+
+            assert_eq!(
+                sign(&env, &caller, 999, true),
+                Err(ContractError::ProposalNotFound)
+            );
+            assert_eq!(
+                execute(&env, &caller, 999),
+                Err(ContractError::ProposalNotFound)
+            );
+            assert_eq!(
+                expire_proposal(&env, 999),
+                Err(ContractError::ProposalNotFound)
+            );
+        });
+    }
+
+    #[test]
+    fn execute_already_executed_proposal() {
+        let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        env.as_contract(&contract_id, || {
+            let creator = Address::generate(&env);
+            let signer = Address::generate(&env);
+            let mut signers = Vec::new(&env);
+            signers.push_back(signer);
+
+            let payload = encode_grant_withdraw(&env, 42);
+            let id = create_proposal(&env, &creator, 42, payload.clone(), signers, 1, 100).unwrap();
+
+            sign(&env, &signer, id, true).unwrap();
+            execute(&env, &creator, id).unwrap();
+
+            // Second execution must fail
+            assert_eq!(
+                execute(&env, &creator, id),
+                Err(ContractError::ProposalAlreadyExecuted)
+            );
+            // Cannot sign either
+            assert_eq!(
+                sign(&env, &signer, id, true),
+                Err(ContractError::ProposalAlreadyExecuted)
+            );
+        });
+    }
 }

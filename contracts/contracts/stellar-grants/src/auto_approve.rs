@@ -168,3 +168,242 @@ pub fn get_config(env: &Env, grant_id: u64) -> Option<AutoApproveConfig> {
 pub fn get_record(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<AutoApproveRecord> {
     Storage::get_auto_approve_record(env, grant_id, milestone_idx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{AutoApproveConfig, Grant, Milestone, MilestoneState, GrantStatus};
+    use crate::storage::Storage;
+    use soroban_sdk::testutils::Address as _;
+
+    fn setup() -> (Env, Address, u64) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let owner = Address::generate(&env);
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let grant_id = 1u64;
+
+        env.as_contract(&contract_id, || {
+            let grant = Grant {
+                id: grant_id,
+                owner: owner.clone(),
+                title: soroban_sdk::String::from_str(&env, "Test Grant"),
+                description: soroban_sdk::String::from_str(&env, "Desc"),
+                total_amount: 1_000_000,
+                disbursed_amount: 0,
+                status: GrantStatus::Active,
+                total_milestones: 2,
+                created_at: env.ledger().timestamp(),
+                updated_at: env.ledger().timestamp(),
+                token: Address::generate(&env),
+                ..Default::default()
+            };
+            Storage::set_grant(&env, &grant);
+
+            let milestone = Milestone {
+                grant_id,
+                index: 0,
+                description: soroban_sdk::String::from_str(&env, "M1"),
+                amount: 500_000,
+                state: MilestoneState::Submitted,
+                approvals: 0,
+                rejections: 0,
+                submission_timestamp: 1000,
+                deadline: None,
+                ..Default::default()
+            };
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+        });
+
+        (env, owner, grant_id)
+    }
+
+    #[test]
+    fn test_set_and_get_config() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+
+        let config = AutoApproveConfig {
+            enabled: true,
+            grace_period_seconds: 3600,
+            min_votes_required: 3,
+        };
+
+        env.as_contract(&contract_id, || {
+            let result = set_config(&env, &owner, grant_id, config.clone());
+            assert_eq!(result, Ok(()));
+
+            let stored = get_config(&env, grant_id).unwrap();
+            assert_eq!(stored.enabled, true);
+            assert_eq!(stored.grace_period_seconds, 3600);
+            assert_eq!(stored.min_votes_required, 3);
+        });
+    }
+
+    #[test]
+    fn test_set_config_rejects_zero_params() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+
+        let config = AutoApproveConfig {
+            enabled: true,
+            grace_period_seconds: 0,
+            min_votes_required: 0,
+        };
+
+        env.as_contract(&contract_id, || {
+            let result = set_config(&env, &owner, grant_id, config);
+            assert_eq!(result, Err(ContractError::InvalidInput));
+        });
+    }
+
+    #[test]
+    fn test_try_auto_approve_not_enabled() {
+        let (env, _owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let caller = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let result = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result, Err(ContractError::AutoApproveNotEnabled));
+        });
+    }
+
+    #[test]
+    fn test_try_auto_approve_grace_period_not_passed() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let caller = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let config = AutoApproveConfig {
+                enabled: true,
+                grace_period_seconds: 3600,
+                min_votes_required: 1,
+            };
+            set_config(&env, &owner, grant_id, config).unwrap();
+
+            // Set enough votes but don't advance time past grace period
+            let mut milestone = Storage::get_milestone_v(&env, grant_id, 0);
+            milestone.approvals = 2;
+            milestone.rejections = 0;
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+
+            let result = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result, Err(ContractError::AutoApproveGracePeriodNotPassed));
+        });
+    }
+
+    #[test]
+    fn test_try_auto_approve_insufficient_votes() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let caller = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let config = AutoApproveConfig {
+                enabled: true,
+                grace_period_seconds: 0,
+                min_votes_required: 5,
+            };
+            set_config(&env, &owner, grant_id, config).unwrap();
+
+            // Only 2 votes cast, need 5
+            let mut milestone = Storage::get_milestone_v(&env, grant_id, 0);
+            milestone.approvals = 1;
+            milestone.rejections = 1;
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+
+            // Advance time past grace period
+            let mut ledger = env.ledger().get();
+            ledger.timestamp = 5000;
+            env.ledger().set(ledger);
+
+            let result = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result, Err(ContractError::AutoApproveInsufficientVotes));
+        });
+    }
+
+    #[test]
+    fn test_try_auto_approve_success() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let caller = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let config = AutoApproveConfig {
+                enabled: true,
+                grace_period_seconds: 0,
+                min_votes_required: 2,
+            };
+            set_config(&env, &owner, grant_id, config).unwrap();
+
+            // 3 approvals, 1 rejection — majority approves
+            let mut milestone = Storage::get_milestone_v(&env, grant_id, 0);
+            milestone.approvals = 3;
+            milestone.rejections = 1;
+            milestone.submission_timestamp = 1000;
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+
+            let result = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result, Ok(true));
+
+            // Record should exist
+            let record = get_record(&env, grant_id, 0).unwrap();
+            assert_eq!(record.triggered_by, caller);
+            assert_eq!(record.votes_at_trigger, 4);
+        });
+    }
+
+    #[test]
+    fn test_try_auto_approve_rejects_already_triggered() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let caller = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            let config = AutoApproveConfig {
+                enabled: true,
+                grace_period_seconds: 0,
+                min_votes_required: 1,
+            };
+            set_config(&env, &owner, grant_id, config).unwrap();
+
+            let mut milestone = Storage::get_milestone_v(&env, grant_id, 0);
+            milestone.approvals = 2;
+            milestone.rejections = 0;
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+
+            // First call succeeds
+            let result = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result, Ok(true));
+
+            // Second call returns false (already triggered)
+            let result2 = try_auto_approve(&env, &caller, grant_id, 0);
+            assert_eq!(result2, Ok(false));
+        });
+    }
+
+    #[test]
+    fn test_can_auto_approve() {
+        let (env, owner, grant_id) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+
+        env.as_contract(&contract_id, || {
+            assert!(!can_auto_approve(&env, grant_id, 0));
+
+            let config = AutoApproveConfig {
+                enabled: true,
+                grace_period_seconds: 0,
+                min_votes_required: 1,
+            };
+            set_config(&env, &owner, grant_id, config).unwrap();
+
+            let mut milestone = Storage::get_milestone_v(&env, grant_id, 0);
+            milestone.approvals = 1;
+            Storage::set_milestone(&env, grant_id, 0, &milestone);
+
+            assert!(can_auto_approve(&env, grant_id, 0));
+        });
+    }
+}

@@ -218,7 +218,7 @@ mod tests {
     fn set_ledger(env: &Env, timestamp: u64, sequence: u32) {
         env.ledger().set(soroban_sdk::testutils::LedgerInfo {
             timestamp,
-            protocol_version: 21,
+            protocol_version: 25,
             sequence_number: sequence,
             base_reserve: 10,
             network_id: Default::default(),

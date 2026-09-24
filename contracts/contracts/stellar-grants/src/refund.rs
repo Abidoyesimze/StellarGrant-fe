@@ -278,7 +278,7 @@ mod tests {
         // advance ledger to one week after start (should still be before latest deadline)
         env.ledger().set(soroban_sdk::testutils::LedgerInfo {
             timestamp: start + crate::constants::SECONDS_PER_WEEK,
-            protocol_version: 21,
+            protocol_version: 25,
             sequence_number: 1,
             base_reserve: 10,
             network_id: Default::default(),

@@ -334,7 +334,7 @@ mod tests {
         // advance ledger far enough to trigger decay (~10 days)
         env.ledger().set(soroban_sdk::testutils::LedgerInfo {
             timestamp: 86400 * 10,
-            protocol_version: 21,
+            protocol_version: 25,
             sequence_number: 1,
             base_reserve: 10,
             network_id: Default::default(),

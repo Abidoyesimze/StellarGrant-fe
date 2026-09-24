@@ -570,7 +570,7 @@ impl StellarGrantsContract {
                 // Deduct protocol fee (split across reviewer reward pool,
                 // revenue-share pool, and treasury) before passing the net
                 // amount to the grant recipient or split recipients.
-                let net_amount = fees::deduct_and_split_fee(env, &grant.token, ms.amount)?;
+                let net_amount = fees::deduct_and_split_fee(env, &grant.token, ms.amount, Some(&grant.owner))?;
                 if split_payment::has_split(env, grant_id, idx) {
                     split_payment::execute_split(env, grant_id, idx, net_amount)?;
                 } else {
@@ -3398,9 +3398,19 @@ impl StellarGrantsContract {
 
     // ── Issue #582: Advanced Protocol Analytics Entry Points ─────────────────
 
-    /// Record a data point in a rolling window.
-    pub fn analytics_record(env: Env, metric: soroban_sdk::Symbol, value: i128) {
+    /// Record a data point in a rolling window. Admin only (#1056).
+    pub fn analytics_record(
+        env: Env,
+        admin: Address,
+        metric: soroban_sdk::Symbol,
+        value: i128,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        if Storage::get_global_admin(&env) != Some(admin) {
+            return Err(ContractError::Unauthorized);
+        }
         analytics::record(&env, metric, value);
+        Ok(())
     }
 
     /// Compute the rolling average for a metric.

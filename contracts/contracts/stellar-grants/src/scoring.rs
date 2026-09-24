@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, String, Vec};
 
-use crate::constants::{BASIS_POINTS_SCALE, MAX_RUBRIC_WEIGHTS};
+use crate::constants::{BASIS_POINTS_SCALE, MAX_RANK_CONTRIBUTORS_INPUT, MAX_RUBRIC_WEIGHTS};
 use crate::errors::ContractError;
 use crate::events::Events;
 use crate::storage::Storage;
@@ -74,7 +74,7 @@ fn compute_dimension_score(env: &Env, contributor: &Address, dimension: &Scoring
             let profile = Storage::get_contributor(env, contributor.clone());
             match profile {
                 Some(p) => {
-                    let total = p.milestones_completed + p.milestones_rejected;
+                    let total = p.milestones_completed.saturating_add(p.milestones_rejected);
                     if total == 0 {
                         return 500;
                     }
@@ -92,7 +92,7 @@ fn compute_dimension_score(env: &Env, contributor: &Address, dimension: &Scoring
             let profile = Storage::get_contributor(env, contributor.clone());
             match profile {
                 Some(p) => {
-                    let total = p.milestones_completed + p.milestones_rejected;
+                    let total = p.milestones_completed.saturating_add(p.milestones_rejected);
                     if total == 0 {
                         return 500;
                     }
@@ -150,7 +150,7 @@ fn compute_dimension_score(env: &Env, contributor: &Address, dimension: &Scoring
             let profile = Storage::get_contributor(env, contributor.clone());
             match profile {
                 Some(p) => {
-                    let total = p.milestones_completed + p.milestones_rejected;
+                    let total = p.milestones_completed.saturating_add(p.milestones_rejected);
                     if total == 0 {
                         return 500;
                     }
@@ -227,7 +227,10 @@ pub fn rank_contributors(
     env: &Env,
     contributors: Vec<Address>,
     rubric_id: u32,
-) -> Vec<ScoreResult> {
+) -> Result<Vec<ScoreResult>, ContractError> {
+    if contributors.len() > MAX_RANK_CONTRIBUTORS_INPUT {
+        return Err(ContractError::InvalidInput);
+    }
     let mut results: Vec<ScoreResult> = Vec::new(env);
     for c in contributors.iter() {
         if let Ok(s) = score_contributor(env, &c, rubric_id) {
@@ -235,7 +238,7 @@ pub fn rank_contributors(
         }
     }
     insertion_sort(&mut results);
-    results
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -405,7 +408,7 @@ mod tests {
         contributors.push_back(c2.clone());
         contributors.push_back(c1.clone());
 
-        let ranked = env.as_contract(&contract_id, || rank_contributors(&env, contributors, id));
+        let ranked = env.as_contract(&contract_id, || rank_contributors(&env, contributors, id).unwrap());
         assert_eq!(ranked.len(), 2);
         assert!(ranked.get(0).unwrap().total_score >= ranked.get(1).unwrap().total_score);
     }

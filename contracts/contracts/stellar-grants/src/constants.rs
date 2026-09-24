@@ -77,6 +77,7 @@ pub const MAX_BATCH_DETAIL_SIZE: u32 = 10;
 
 // ── Scoring ──────────────────────────────────────────────────────────────────
 pub const MAX_SCORE: u32 = 1_000;
+pub const MAX_RANK_CONTRIBUTORS_INPUT: u32 = 100;
 
 // ── Relay ────────────────────────────────────────────────────────────────────
 pub const DEFAULT_RELAY_DAILY_LIMIT: u32 = 5;

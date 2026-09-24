@@ -2035,9 +2035,14 @@ impl StellarGrantsContract {
         snapshot::get_snapshot(&env, grant_id, snapshot_id)
     }
 
-    /// List all state snapshots captured for a grant.
-    pub fn list_snapshots(env: Env, grant_id: u64) -> Vec<StateSnapshot> {
-        snapshot::list_snapshots(&env, grant_id)
+    /// List state snapshots captured for a grant, paginated.
+    pub fn list_snapshots(
+        env: Env,
+        grant_id: u64,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<StateSnapshot> {
+        snapshot::list_snapshots(&env, grant_id, offset, limit)
     }
 
     /// Fetch the most recent state snapshot for a grant, if any.
@@ -2363,6 +2368,17 @@ impl StellarGrantsContract {
         epoch_id: u32,
     ) -> Result<i128, ContractError> {
         revenue_share::claim(&env, &staker, epoch_id)
+    }
+
+    /// Register a staker's stake weight for a revenue epoch so that `claim`
+    /// can succeed after the epoch is finalized.
+    pub fn stake_revenue_share(
+        env: Env,
+        staker: Address,
+        epoch_id: u32,
+        weight: i128,
+    ) -> Result<(), ContractError> {
+        revenue_share::stake(&env, &staker, epoch_id, weight)
     }
 
     pub fn compute_revenue_claim(env: Env, staker: Address, epoch_id: u32) -> i128 {
@@ -2747,9 +2763,15 @@ impl StellarGrantsContract {
         relay::can_relay(&env, &sender, &action)
     }
 
-    /// Reimburse the relayer from the treasury.
-    pub fn relay_reimburse(env: Env, relayer: Address) -> Result<(), ContractError> {
-        relay::reimburse_relayer(&env, &relayer)
+    /// Reimburse the relayer from the treasury. Admin only.
+    pub fn relay_reimburse(
+        env: Env,
+        admin: Address,
+        relayer: Address,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        relay::reimburse_relayer(&env, &admin, &relayer, &token, amount)
     }
 
     /// Get relay allowance for an address.

@@ -1,7 +1,8 @@
 use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
 
+use crate::rate_limit;
 use crate::storage::Storage;
-use crate::types::{ContractError, MilestoneState, SnapshotTrigger, StateSnapshot};
+use crate::types::{ContractError, MilestoneState, RateLimitAction, SnapshotTrigger, StateSnapshot};
 
 #[contracttype]
 pub enum SnapshotKey {
@@ -24,6 +25,8 @@ pub fn capture(
     trigger: SnapshotTrigger,
     captured_by: &Address,
 ) -> Result<u32, ContractError> {
+    rate_limit::check_and_increment(env, captured_by, RateLimitAction::SnapshotCapture)?;
+
     let grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
 
     let is_related = grant.owner == *captured_by
@@ -82,7 +85,23 @@ pub fn get_snapshot(
         .ok_or(ContractError::InvalidState)
 }
 
-pub fn list_snapshots(env: &Env, grant_id: u64) -> Vec<StateSnapshot> {
+pub fn list_snapshots(env: &Env, grant_id: u64, offset: u32, limit: u32) -> Vec<StateSnapshot> {
+    let ids: Vec<u32> = env
+        .storage()
+        .persistent()
+        .get(&SnapshotKey::List(grant_id))
+        .unwrap_or_else(|| Vec::new(env));
+    let page = crate::pagination::paginate(env, &ids, offset, limit);
+    let mut out = Vec::new(env);
+    for id in page.iter() {
+        if let Ok(s) = get_snapshot(env, grant_id, id) {
+            out.push_back(s);
+        }
+    }
+    out
+}
+
+pub fn list_snapshots_all(env: &Env, grant_id: u64) -> Vec<StateSnapshot> {
     let ids: Vec<u32> = env
         .storage()
         .persistent()
@@ -98,7 +117,7 @@ pub fn list_snapshots(env: &Env, grant_id: u64) -> Vec<StateSnapshot> {
 }
 
 pub fn latest_snapshot(env: &Env, grant_id: u64) -> Option<StateSnapshot> {
-    let list = list_snapshots(env, grant_id);
+    let list = list_snapshots_all(env, grant_id);
     if list.is_empty() {
         None
     } else {

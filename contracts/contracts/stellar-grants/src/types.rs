@@ -1375,6 +1375,7 @@ pub enum RateLimitAction {
     DisputeRaise = 3,
     BountyCreate = 4,
     WaitlistJoin = 5,
+    SnapshotCapture = 6,
 }
 
 #[contracttype]

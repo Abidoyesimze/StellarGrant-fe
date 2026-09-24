@@ -45,6 +45,7 @@ pub fn withdraw(
     to: &Address,
     amount: i128,
 ) -> Result<i128, ContractError> {
+    admin.require_auth();
     require_global_admin(env, admin)?;
 
     if amount <= 0 {
@@ -125,6 +126,44 @@ pub fn reallocate(
 /// Current treasury balance for `token`.
 pub fn balance(env: &Env, token: &Address) -> i128 {
     Storage::get_treasury_balance(env, token)
+}
+
+/// DAO-authorized treasury withdrawal (#1058). No admin `require_auth()` —
+/// the caller (`dao::execute`) is itself the authorization, having already
+/// verified the proposal passed. Separated from `withdraw` so the direct
+/// admin path still requires a genuine admin signature.
+pub fn withdraw_via_dao(
+    env: &Env,
+    token: &Address,
+    to: &Address,
+    amount: i128,
+) -> Result<i128, ContractError> {
+    if amount <= 0 {
+        return Err(ContractError::ZeroAmount);
+    }
+
+    let balance = Storage::get_treasury_balance(env, token);
+    if balance < amount {
+        return Err(ContractError::InsufficientTreasuryBalance);
+    }
+
+    let new_balance = balance
+        .checked_sub(amount)
+        .ok_or(ContractError::InvalidInput)?;
+    Storage::set_treasury_balance(env, token, new_balance);
+
+    token::Client::new(env, token).transfer(&env.current_contract_address(), to, &amount);
+
+    Events::emit_treasury_withdrawn(
+        env,
+        token.clone(),
+        to.clone(),
+        amount,
+        new_balance,
+        env.current_contract_address(),
+    );
+
+    Ok(new_balance)
 }
 
 /// Point-in-time snapshot of the treasury balance for `token`, for frontend display.

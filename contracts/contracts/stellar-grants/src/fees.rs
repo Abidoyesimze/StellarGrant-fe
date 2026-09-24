@@ -1,6 +1,7 @@
 use soroban_sdk::{token, Address, Env};
 
 use crate::config;
+use crate::referral;
 use crate::storage::Storage;
 use crate::types::ContractError;
 
@@ -28,6 +29,7 @@ pub fn deduct_and_split_fee(
     env: &Env,
     token: &Address,
     gross_amount: i128,
+    payer: Option<&Address>,
 ) -> Result<i128, ContractError> {
     if gross_amount <= 0 {
         return Ok(0);
@@ -61,6 +63,13 @@ pub fn deduct_and_split_fee(
     let net = gross_amount
         .checked_sub(total_fee)
         .ok_or(ContractError::InvalidInput)?;
+
+    // #1059: trigger referral reward on the payer's first qualifying payout.
+    // `payer` is the grant owner receiving funds — check if they have a referral record.
+    if let Some(payer) = payer {
+        let _ = referral::trigger_reward(env, payer, token, total_fee);
+    }
+
     Ok(net)
 }
 
@@ -128,7 +137,7 @@ mod tests {
             Storage::set_protocol_config(&env, &cfg);
 
             let gross: i128 = 1_000_000;
-            let net = deduct_and_split_fee(&env, &token, gross).unwrap();
+            let net = deduct_and_split_fee(&env, &token, gross, None).unwrap();
 
             // 10% fee = 100_000
             // 50% of fee = 50_000 to reviewer pool
@@ -162,7 +171,7 @@ mod tests {
             Storage::set_protocol_config(&env, &cfg);
 
             let gross: i128 = 1_000_000;
-            let net = deduct_and_split_fee(&env, &token, gross).unwrap();
+            let net = deduct_and_split_fee(&env, &token, gross, None).unwrap();
 
             // 10% fee = 100_000
             // 30% of fee = 30_000 to reviewer
@@ -194,7 +203,7 @@ mod tests {
             cfg.protocol_fee_bps = 0;
             Storage::set_protocol_config(&env, &cfg);
 
-            let net = deduct_and_split_fee(&env, &token, 1_000_000).unwrap();
+            let net = deduct_and_split_fee(&env, &token, 1_000_000, None).unwrap();
             assert_eq!(net, 1_000_000);
         });
     }
@@ -213,7 +222,7 @@ mod tests {
             Storage::set_protocol_config(&env, &cfg);
 
             let gross: i128 = 100_000;
-            let net = deduct_and_split_fee(&env, &token, gross).unwrap();
+            let net = deduct_and_split_fee(&env, &token, gross, None).unwrap();
 
             // 5% fee = 5000
             // 20% of fee = 1000 to reviewer

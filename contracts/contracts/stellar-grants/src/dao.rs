@@ -174,13 +174,9 @@ pub fn execute(env: &Env, executor: &Address, proposal_id: u64) -> Result<(), Co
             Storage::set_global_admin(env, new_admin);
         }
         DaoProposalType::TreasuryWithdrawal(token, to, amount) => {
-            crate::treasury::withdraw(
-                env,
-                &Storage::get_global_admin(env).ok_or(ContractError::Unauthorized)?,
-                token,
-                to,
-                *amount,
-            )?;
+            // #1058: use withdraw_via_dao — authorized by the proposal having passed,
+            // not by admin.require_auth() (which the old path bypassed anyway).
+            crate::treasury::withdraw_via_dao(env, token, to, *amount)?;
         }
         DaoProposalType::Generic => {}
     }

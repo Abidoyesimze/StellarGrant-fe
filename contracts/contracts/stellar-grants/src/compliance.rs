@@ -9,6 +9,7 @@ use crate::types::{ComplianceAttestation, ComplianceLevel, ComplianceStatus};
 
 /// Register a trusted compliance verifier address. Admin only.
 pub fn set_verifier(env: &Env, admin: &Address, verifier: &Address) -> Result<(), ContractError> {
+    admin.require_auth();
     if Storage::get_global_admin(env) != Some(admin.clone()) {
         return Err(ContractError::Unauthorized);
     }
@@ -33,6 +34,7 @@ pub fn attest(
     expires_at: u64,
     jurisdiction: String,
 ) -> Result<(), ContractError> {
+    verifier.require_auth();
     let registered_verifier =
         Storage::get_compliance_verifier(env).ok_or(ContractError::VerifierNotSet)?;
     if *verifier != registered_verifier {
@@ -67,6 +69,7 @@ pub fn attest(
 
 /// Revoke a compliance attestation. Verifier or admin only.
 pub fn revoke(env: &Env, revoker: &Address, subject: &Address) -> Result<(), ContractError> {
+    revoker.require_auth();
     let is_admin = Storage::get_global_admin(env) == Some(revoker.clone());
     let is_verifier = Storage::get_compliance_verifier(env) == Some(revoker.clone());
     if !is_admin && !is_verifier {

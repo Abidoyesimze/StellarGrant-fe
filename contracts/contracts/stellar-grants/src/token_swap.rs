@@ -143,6 +143,9 @@ pub fn swap_and_fund(
     funder.require_auth();
 
     let grant = Storage::get_grant(env, grant_id).ok_or(ContractError::GrantNotFound)?;
+    if grant.status != crate::types::GrantStatus::Active {
+        return Err(ContractError::InvalidState);
+    }
     if input_token == &grant.token {
         crate::escrow::deposit(env, grant_id, funder, input_amount)?;
         let result = SwapResult {
@@ -386,6 +389,52 @@ mod tests {
             let grant = Storage::get_grant(&env, 1).unwrap();
             assert!(grant.escrow_balance > 0);
         });
+    }
+
+    #[test]
+    fn test_swap_and_fund_rejects_inactive_grant() {
+        let (env, contract_id) = setup_env();
+        let client = StellarGrantsContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let funder = Address::generate(&env);
+
+        let token_admin = Address::generate(&env);
+        let asset = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let stellar_asset = StellarAssetClient::new(&env, &asset.address());
+        stellar_asset.mint(&funder, &1_000_000);
+
+        client.set_global_admin(&admin, &admin);
+
+        env.as_contract(&contract_id, || {
+            let token = asset.address();
+            crate::escrow::open(&env, 1, &admin, &token).unwrap();
+            let grant = crate::types::Grant {
+                id: 1,
+                owner: admin.clone(),
+                title: soroban_sdk::String::from_str(&env, "test"),
+                description: soroban_sdk::String::from_str(&env, "desc"),
+                token: token.clone(),
+                status: crate::types::GrantStatus::Cancelled,
+                total_amount: 100_000,
+                milestone_amount: 10_000,
+                reviewers: soroban_sdk::Vec::new(&env),
+                total_milestones: 1,
+                milestones_paid_out: 0,
+                escrow_balance: 0,
+                funders: soroban_sdk::Vec::new(&env),
+                reason: None,
+                timestamp: env.ledger().timestamp(),
+                require_compliance: None,
+            };
+            Storage::set_grant(&env, 1, &grant);
+        });
+
+        let token = asset.address();
+        let result = env.as_contract(&contract_id, || {
+            swap_and_fund(&env, &funder, 1, &token, 1000)
+        });
+        assert_eq!(result, Err(ContractError::InvalidState));
     }
 
     fn open_funded_grant(

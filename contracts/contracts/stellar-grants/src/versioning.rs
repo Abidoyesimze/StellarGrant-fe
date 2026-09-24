@@ -2,7 +2,7 @@ use soroban_sdk::{Address, Env, Map, String, Symbol, Vec};
 
 use crate::errors::ContractError;
 use crate::storage::Storage;
-use crate::types::{Amendment, AmendmentStatus, Grant, GrantVersion};
+use crate::types::{Amendment, AmendmentStatus, Grant, GrantVersion, Milestone, MilestoneState};
 
 fn field(env: &Env, name: &str) -> String {
     String::from_str(env, name)
@@ -238,28 +238,102 @@ pub fn apply_amendment(
     let description = field(env, "description");
     let total_amount = field(env, "total_amount");
     let total_milestones = field(env, "total_milestones");
+
+    let mut new_title: Option<String> = None;
+    let mut new_description: Option<String> = None;
+    let mut new_total_amount: Option<i128> = None;
+    let mut new_total_milestones: Option<u32> = None;
+
     for i in 0..amendment.changed_fields.len() {
         let changed = amendment.changed_fields.get(i).unwrap();
         let value = amendment.new_values.get(i).unwrap();
         if changed == title {
-            snapshot.title = value.clone();
-            grant.title = value;
+            new_title = Some(value);
         } else if changed == description {
-            snapshot.description = value.clone();
-            grant.description = value;
+            new_description = Some(value);
         } else if changed == total_amount {
             // Try to parse string value as i128
-            if let Some(new_total) = parse_i128_from_string(&value) {
-                snapshot.total_amount = new_total;
-                grant.total_amount = new_total;
+            if let Some(parsed) = parse_i128_from_string(&value) {
+                new_total_amount = Some(parsed);
             }
         } else if changed == total_milestones {
             // Try to parse string value as u32
-            if let Some(new_total) = parse_u32_from_string(&value) {
-                snapshot.total_milestones = new_total;
-                grant.total_milestones = new_total;
+            if let Some(parsed) = parse_u32_from_string(&value) {
+                new_total_milestones = Some(parsed);
             }
         }
+    }
+
+    // Re-validate the milestone_amount * total_milestones <= total_amount
+    // invariant enforced at creation time whenever either operand changes;
+    // otherwise a previously-valid grant can be amended into an
+    // inconsistent state (#1093).
+    if new_total_amount.is_some() || new_total_milestones.is_some() {
+        let effective_total_amount = new_total_amount.unwrap_or(grant.total_amount);
+        let effective_total_milestones = new_total_milestones.unwrap_or(grant.total_milestones);
+        let required = grant
+            .milestone_amount
+            .checked_mul(effective_total_milestones as i128)
+            .ok_or(ContractError::InvalidInput)?;
+        if required > effective_total_amount {
+            return Err(ContractError::InvalidInput);
+        }
+    }
+
+    // Reject shrinking total_milestones if any of the removed indices
+    // already has progress recorded; a milestone with real state must not
+    // be silently discarded.
+    if let Some(new_total) = new_total_milestones {
+        if new_total < grant.total_milestones {
+            for idx in new_total..grant.total_milestones {
+                if let Some(milestone) = Storage::get_milestone(env, grant_id, idx) {
+                    if milestone.state != MilestoneState::Pending {
+                        return Err(ContractError::InvalidState);
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(value) = new_title {
+        snapshot.title = value.clone();
+        grant.title = value;
+    }
+    if let Some(value) = new_description {
+        snapshot.description = value.clone();
+        grant.description = value;
+    }
+    if let Some(new_total) = new_total_amount {
+        snapshot.total_amount = new_total;
+        grant.total_amount = new_total;
+    }
+    if let Some(new_total) = new_total_milestones {
+        if new_total > grant.total_milestones {
+            for idx in grant.total_milestones..new_total {
+                let milestone = Milestone {
+                    idx,
+                    description: String::from_str(env, ""),
+                    amount: grant.milestone_amount,
+                    state: MilestoneState::Pending,
+                    votes: Map::new(env),
+                    approvals: 0,
+                    rejections: 0,
+                    reasons: Map::new(env),
+                    status_updated_at: env.ledger().timestamp(),
+                    proof_url: None,
+                    submission_timestamp: 0,
+                    deadline: None,
+                    reviewer_count_snapshot: grant.reviewers.len(),
+                };
+                Storage::set_milestone(env, grant_id, idx, &milestone);
+            }
+        } else if new_total < grant.total_milestones {
+            for idx in new_total..grant.total_milestones {
+                Storage::remove_milestone(env, grant_id, idx);
+            }
+        }
+        snapshot.total_milestones = new_total;
+        grant.total_milestones = new_total;
     }
 
     snapshot.version = amendment_version;
@@ -557,6 +631,91 @@ mod tests {
                 (9_999, 3)
             );
             assert_eq!((grant.total_amount, grant.total_milestones), (9_999, 3));
+        });
+    }
+
+    #[test]
+    fn test_apply_amendment_raising_total_milestones_creates_pending_milestones() {
+        let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let owner = Address::generate(&env);
+
+        let reviewer = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // milestone_amount = 2_500. Raising total_milestones to 6
+            // requires 15_000, so total_amount is raised alongside it to
+            // keep the milestone_amount * total_milestones <= total_amount
+            // invariant satisfied.
+            let grant_id = seed_grant(&env, 1, &owner, 10_000, 4);
+            set_reviewers(&env, grant_id, vec![&env, reviewer.clone()]);
+
+            let version = propose_amendment(
+                &env,
+                &owner,
+                grant_id,
+                vec![
+                    &env,
+                    String::from_str(&env, "total_amount"),
+                    String::from_str(&env, "total_milestones"),
+                ],
+                vec![&env, String::from_str(&env, "20000"), String::from_str(&env, "6")],
+                String::from_str(&env, "more checkpoints, bigger budget"),
+            )
+            .expect("amendment should be proposed");
+            vote_amendment(&env, &reviewer, grant_id, version, true)
+                .expect("amendment should be approved");
+
+            apply_amendment(&env, grant_id, version).expect("amendment should apply");
+
+            let grant = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(grant.total_milestones, 6);
+
+            // Newly added indices 4 and 5 must have a Milestone record so
+            // finalize_grant_release's 0..total_milestones loop can find
+            // them, instead of permanently failing with
+            // NotAllMilestonesApproved (#1093).
+            for idx in 4..6 {
+                let milestone = Storage::get_milestone(&env, grant_id, idx)
+                    .expect("new milestone slot should exist");
+                assert_eq!(milestone.state, MilestoneState::Pending);
+                assert_eq!(milestone.amount, grant.milestone_amount);
+            }
+        });
+    }
+
+    #[test]
+    fn test_apply_amendment_rejects_invariant_violation() {
+        let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let owner = Address::generate(&env);
+
+        let reviewer = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // milestone_amount = 2_500. Raising total_milestones to 6 would
+            // require 15_000, which exceeds total_amount (10_000).
+            let grant_id = seed_grant(&env, 1, &owner, 10_000, 4);
+            set_reviewers(&env, grant_id, vec![&env, reviewer.clone()]);
+
+            let version = propose_amendment(
+                &env,
+                &owner,
+                grant_id,
+                vec![&env, String::from_str(&env, "total_milestones")],
+                vec![&env, String::from_str(&env, "6")],
+                String::from_str(&env, "more checkpoints"),
+            )
+            .expect("amendment should be proposed");
+            vote_amendment(&env, &reviewer, grant_id, version, true)
+                .expect("amendment should be approved");
+
+            let result = apply_amendment(&env, grant_id, version);
+            assert_eq!(result, Err(ContractError::InvalidInput));
+
+            // The grant must be left untouched.
+            let grant = Storage::get_grant(&env, grant_id).unwrap();
+            assert_eq!(grant.total_milestones, 4);
         });
     }
 }

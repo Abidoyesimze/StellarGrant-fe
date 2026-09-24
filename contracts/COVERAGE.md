@@ -1,6 +1,6 @@
 # Code Coverage
 
-This document describes the automated code coverage setup for the `contracts` workspace.
+This document describes the code coverage setup for the `contracts` workspace. Coverage is currently a **local-only** workflow — it is not yet wired into CI (see [CI Integration](#ci-integration)).
 
 ---
 
@@ -47,7 +47,7 @@ cd contracts
 cargo tarpaulin --workspace --lib --target x86_64-unknown-linux-gnu --engine llvm --out Xml
 ```
 
-> **Note**: This is the exact same command used in CI. The `.tarpaulin.toml` config is auto-detected.
+> **Note**: The `.tarpaulin.toml` config is auto-detected. This is currently a local-only workflow — see [CI Integration](#ci-integration) below.
 
 ### What is measured
 
@@ -65,44 +65,24 @@ cargo tarpaulin --workspace --lib --target x86_64-unknown-linux-gnu --engine llv
 
 ## CI Integration
 
-Coverage runs automatically on:
-- Every **pull request**
-- Every **push to `main`**
+> ⚠️ **Coverage is not currently wired into CI.** `.github/workflows/ci.yml` has no
+> tarpaulin step and no Codecov upload — the `contracts` job only runs
+> `cargo fmt --check`, `cargo clippy`, `cargo check`, and `cargo test`, all
+> against the WASM target. The `.tarpaulin.toml` config above exists and is
+> valid, but nothing in CI currently invokes it. Coverage is a **local-only**
+> workflow for now; run the command above yourself before opening a PR if you
+> want a coverage number.
 
-The coverage job in `.github/workflows/ci.yml`:
+If someone wires this up in the future, a coverage job would need to:
 
-1. Sets up Rust with `llvm-tools-preview` component
-2. Caches dependencies with `Swatinem/rust-cache`
-3. Installs `cargo-tarpaulin`
-4. Runs coverage on the **native host target** (`x86_64-unknown-linux-gnu`) — not WASM
-5. Uploads `cobertura.xml` as a GitHub Actions artifact (retained for 7 days)
-6. Uploads the report to [Codecov](https://codecov.io) with the `unittests` flag
+1. Set up Rust with the `llvm-tools-preview` component
+2. Cache dependencies (e.g. with `Swatinem/rust-cache`)
+3. Install `cargo-tarpaulin`
+4. Run coverage on the **native host target** (`x86_64-unknown-linux-gnu`) — not WASM
+5. Upload `cobertura.xml` as a build artifact and/or to a coverage service such as [Codecov](https://codecov.io)
 
-> ⚠️ The `contracts` job (WASM build) is completely separate and **not affected** by the coverage pipeline.
-
----
-
-## Codecov Setup
-
-### Required Secret
-
-Add the following secret to your GitHub repository:
-
-**Settings → Secrets and variables → Actions → New repository secret**
-
-| Name | Value |
-|---|---|
-| `CODECOV_TOKEN` | *(Token from your Codecov dashboard — Settings → Repository Upload Token)* |
-
-> **Fork PR note**: GitHub does not expose repository secrets to workflows triggered from forks (security policy). This means coverage upload will silently skip on fork PRs but **will succeed** on pushes to `main` from the base repository. CI will still pass — `fail_ci_if_error` is set to `false` to handle this gracefully.
-
-### Badge
-
-Add this to the root `README.md`, replacing `<owner>` and `<repo>` with your GitHub username and repository name:
-
-```markdown
-[![codecov](https://codecov.io/gh/<owner>/<repo>/branch/main/graph/badge.svg)](https://codecov.io/gh/<owner>/<repo>)
-```
+That job would run alongside, not replace, the existing `contracts` job
+(WASM lint/check/test).
 
 ---
 

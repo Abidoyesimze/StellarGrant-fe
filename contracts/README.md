@@ -54,7 +54,7 @@ The StellarGrants contract is organized into modular components:
 
 - **`lib.rs`**: Main contract implementation with public functions
 - **`types.rs`**: Data structures, error types, and type definitions
-- **`storage.rs`**: Storage key helpers and data persistence
+- **`storage/`**: Storage key helpers and data persistence (`mod.rs`, `keys.rs`, `helpers.rs`)
 - **`events.rs`**: Event definitions and emission helpers
 - **`test.rs`**: Unit tests for contract functions
 
@@ -95,7 +95,10 @@ StellarGrant/
 │       │   ├── lib.rs           # Main contract implementation
 │       │   ├── types.rs         # Data structures and errors
 │       │   ├── events.rs        # Event definitions
-│       │   ├── storage.rs       # Storage helpers
+│       │   ├── storage/         # Storage helpers
+│       │   │   ├── mod.rs       # Public storage surface
+│       │   │   ├── keys.rs      # Typed DataKey enums
+│       │   │   └── helpers.rs   # Storage wrapper with typed accessors
 │       │   └── test.rs          # Unit tests
 │       ├── Cargo.toml           # Contract dependencies
 │       └── Makefile             # Build commands
@@ -351,20 +354,24 @@ The **global admin** is the contract-wide role used for council rotation, WASM u
 ### Creating a Grant
 
 ```rust
-use soroban_sdk::{Address, String, Env};
+use soroban_sdk::{Address, String, Vec, Env};
 
 let env = Env::default();
 let contract_id = env.register_contract(None, StellarGrantsContract);
 let client = StellarGrantsContractClient::new(&env, &contract_id);
 
 let owner = Address::generate(&env);
+let token = Address::generate(&env);
+let reviewers: Vec<Address> = Vec::new(&env);
 let grant_id = client.grant_create(
     &owner,
     &String::from_str(&env, "Open Source Project Grant"),
     &String::from_str(&env, "Funding for Q1 development milestones"),
+    &token,      // Token used for escrow and payouts
     &10000i128,  // Total amount
     &2500i128,   // Per milestone
     &4u32,       // Number of milestones
+    &reviewers,  // Authorized reviewers
 )?;
 ```
 
@@ -384,6 +391,7 @@ client.grant_fund(&grant_id, &funder, &10000i128)?;
 client.milestone_submit(
     &grant_id,
     &0u32, // Milestone index
+    &owner, // Recipient (grant owner)
     &String::from_str(&env, "Completed feature X"),
     &String::from_str(&env, "https://github.com/..."), // Proof URL
 )?;
@@ -392,11 +400,13 @@ client.milestone_submit(
 ### Voting on a Milestone
 
 ```rust
+let reviewer = Address::generate(&env);
 let approved = client.milestone_vote(
     &grant_id,
     &0u32,
     &reviewer,
     &true, // Approve
+    &None, // Optional feedback
 )?;
 
 // If quorum reached, approved = true and payout triggered automatically
@@ -481,7 +491,7 @@ Security is a top priority. Before deployment:
 - Heartbeat Mechanism implementation
 - Blacklist System for security enforcement
 - Machine-Readable Receipt System
-- Comprehensive test suite (64 tests)
+- Comprehensive test suite
 
 ### 📋 Planned
 - TypeScript SDK

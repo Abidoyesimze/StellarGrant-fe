@@ -3,7 +3,7 @@ use soroban_sdk::{contractevent, token, Address, Env, Vec};
 use crate::constants::EPOCH_DURATION_SECONDS;
 use crate::errors::ContractError;
 use crate::storage::Storage;
-use crate::types::RevenueEpoch;
+use crate::types::{RevenueEpoch, StakerEpochRecord};
 
 #[contractevent]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +19,14 @@ pub struct RevenueClaimed {
     pub staker: Address,
     pub epoch_id: u32,
     pub amount: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StakeRegistered {
+    pub staker: Address,
+    pub epoch_id: u32,
+    pub weight: i128,
 }
 
 fn epoch_bounds(epoch_id: u32) -> (u64, u64) {
@@ -43,6 +51,53 @@ fn empty_epoch(epoch_id: u32, token: &Address) -> RevenueEpoch {
         finalized: false,
         claimed_count: 0,
     }
+}
+
+/// Register a staker's stake weight for an epoch. This is the missing path
+/// that populates `StakerEpochRecord`/`total_stake_weight` so that `claim`
+/// can actually succeed after an epoch is finalized.
+pub fn stake(
+    env: &Env,
+    staker: &Address,
+    epoch_id: u32,
+    weight: i128,
+) -> Result<(), ContractError> {
+    staker.require_auth();
+    if weight <= 0 {
+        return Err(ContractError::InvalidInput);
+    }
+
+    let mut record = Storage::get_staker_epoch_record(env, staker, epoch_id)
+        .unwrap_or_else(|| StakerEpochRecord {
+            staker: staker.clone(),
+            epoch_id,
+            stake_weight: 0,
+            claimable: 0,
+            claimed: false,
+            claimed_at: None,
+        });
+    record.stake_weight = record
+        .stake_weight
+        .checked_add(weight)
+        .ok_or(ContractError::InvalidInput)?;
+    Storage::set_staker_epoch_record(env, &record);
+
+    let mut epoch = Storage::get_revenue_epoch(env, epoch_id)
+        .unwrap_or_else(|| empty_epoch(epoch_id, &env.current_contract_address()));
+    epoch.total_stake_weight = epoch
+        .total_stake_weight
+        .checked_add(weight)
+        .ok_or(ContractError::InvalidInput)?;
+    Storage::set_revenue_epoch(env, &epoch);
+
+    StakeRegistered {
+        staker: staker.clone(),
+        epoch_id,
+        weight,
+    }
+    .publish(env);
+
+    Ok(())
 }
 
 /// Deposit revenue into the current epoch pool. Called by fees.rs.

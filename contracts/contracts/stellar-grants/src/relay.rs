@@ -285,7 +285,18 @@ pub fn can_relay(env: &Env, sender: &Address, action: &RelayableAction) -> bool 
     }
 }
 
-pub fn reimburse_relayer(_env: &Env, _relayer: &Address) -> Result<(), ContractError> {
+pub fn reimburse_relayer(
+    env: &Env,
+    admin: &Address,
+    relayer: &Address,
+    token: &Address,
+    amount: i128,
+) -> Result<(), ContractError> {
+    admin.require_auth();
+    if Storage::get_global_admin(env) != Some(admin.clone()) {
+        return Err(ContractError::Unauthorized);
+    }
+    crate::treasury::withdraw(env, admin, token, relayer, amount)?;
     Ok(())
 }
 

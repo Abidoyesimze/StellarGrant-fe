@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::escrow;
 use crate::events::Events;
 use crate::storage::Storage;
@@ -27,6 +28,9 @@ pub fn register_split(
         return Err(ContractError::MilestoneIndexOutOfBounds);
     }
     if recipients.is_empty() {
+        return Err(ContractError::InvalidInput);
+    }
+    if recipients.len() > constants::MAX_SPLIT_RECIPIENTS {
         return Err(ContractError::InvalidInput);
     }
 

@@ -349,13 +349,9 @@ mod tests {
         let cat_id = env.as_contract(&contract_id, || {
             Storage::set_global_admin(&env, &admin);
             let subs = Vec::new(&env);
-            let cat_id = create_category(
-                &env,
-                &admin,
-                String::from_str(&env, "Infrastructure"),
-                subs,
-            )
-            .unwrap();
+            let cat_id =
+                create_category(&env, &admin, String::from_str(&env, "Infrastructure"), subs)
+                    .unwrap();
             setup_grant(&env, 10, &owner);
             setup_grant(&env, 20, &owner);
             setup_grant(&env, 30, &owner);

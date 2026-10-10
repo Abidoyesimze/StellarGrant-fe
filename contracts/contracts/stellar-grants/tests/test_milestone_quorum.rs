@@ -71,7 +71,14 @@ fn test_milestone_voting_quorum_and_events() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
-    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
+    satisfy_checklist(
+        &env,
+        &client,
+        &owner,
+        &reviewers.get(0).unwrap(),
+        grant_id,
+        0,
+    );
 
     let res1 = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
     assert!(!res1); // Quorum not reached yet (1/2)
@@ -124,7 +131,14 @@ fn test_milestone_vote_after_quorum_panics() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
-    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
+    satisfy_checklist(
+        &env,
+        &client,
+        &owner,
+        &reviewers.get(0).unwrap(),
+        grant_id,
+        0,
+    );
     let ts = env.ledger().timestamp();
     env.ledger()
         .set_timestamp(ts.saturating_add(COMMUNITY_REVIEW_PERIOD).saturating_add(1));
@@ -172,7 +186,14 @@ fn test_milestone_double_voting_panics() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
-    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
+    satisfy_checklist(
+        &env,
+        &client,
+        &owner,
+        &reviewers.get(0).unwrap(),
+        grant_id,
+        0,
+    );
 
     let ts = env.ledger().timestamp();
     env.ledger()

@@ -131,8 +131,18 @@ pub fn withdraw_stream(
     recipient: &Address,
     stream_id: u32,
 ) -> Result<i128, ContractError> {
-    crate::reentrancy::protect(env)?;
     recipient.require_auth();
+    withdraw_stream_authorized(env, recipient, stream_id)
+}
+
+/// `withdraw_stream` for callers that have already authorized `recipient`
+/// in this invocation (e.g. the relay), where requiring it again would trap.
+pub(crate) fn withdraw_stream_authorized(
+    env: &Env,
+    recipient: &Address,
+    stream_id: u32,
+) -> Result<i128, ContractError> {
+    crate::reentrancy::protect(env)?;
 
     let mut stream = Storage::get_stream(env, stream_id).ok_or(ContractError::StreamNotFound)?;
 

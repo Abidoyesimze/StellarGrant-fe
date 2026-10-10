@@ -183,6 +183,10 @@ mod test {
             require_compliance: None,
         };
         Storage::set_grant(env, id, &grant);
+        // Keep the id counter past seeded grants so forks don't reuse their id.
+        while Storage::get_grant_counter(env) < id {
+            Storage::increment_grant_counter(env);
+        }
     }
 
     fn setup_milestone(env: &Env, grant_id: u64, idx: u32, description: &str) {
@@ -323,44 +327,36 @@ mod test {
     fn test_fork_depth_limit() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let owner = Address::generate(&env);
+        let token = Address::generate(&env);
 
-        env.as_contract(&contract_id, || {
-            let owner = Address::generate(&env);
-            let token = Address::generate(&env);
+        env.as_contract(&contract_id, || setup_grant(&env, 1, &owner));
 
-            setup_grant(&env, 1, &owner);
-            let mut current_id = 1;
-
-            for _ in 0..MAX_FORK_DEPTH {
-                let caller = Address::generate(&env);
-                current_id = fork_grant(
+        // Each fork is its own invocation, so it gets its own frame (and its
+        // own per-invocation resource limits).
+        let fork = |parent: u64| {
+            let caller = Address::generate(&env);
+            env.as_contract(&contract_id, || {
+                fork_grant(
                     &env,
                     &caller,
-                    current_id,
+                    parent,
                     String::from_str(&env, "Fork"),
                     String::from_str(&env, "Desc"),
-                    100,
+                    1000,
                     &token,
                     false,
                     false,
                 )
-                .unwrap();
-            }
+            })
+        };
 
-            let caller = Address::generate(&env);
-            let result = fork_grant(
-                &env,
-                &caller,
-                current_id,
-                String::from_str(&env, "Fork"),
-                String::from_str(&env, "Desc"),
-                100,
-                &token,
-                false,
-                false,
-            );
-            assert_eq!(result, Err(ContractError::InvalidInput));
-        });
+        let mut current_id = 1;
+        for _ in 0..MAX_FORK_DEPTH {
+            current_id = fork(current_id).unwrap();
+        }
+
+        assert_eq!(fork(current_id), Err(ContractError::InvalidInput));
     }
 
     #[test]
@@ -452,7 +448,7 @@ mod test {
                 1,
                 String::from_str(&env, "Fork 1"),
                 String::from_str(&env, "Desc"),
-                100,
+                1000,
                 &token,
                 false,
                 false,
@@ -466,7 +462,7 @@ mod test {
                 1,
                 String::from_str(&env, "Fork 2"),
                 String::from_str(&env, "Desc"),
-                100,
+                1000,
                 &token,
                 false,
                 false,

@@ -206,6 +206,9 @@ mod tests {
         let admin = Address::generate(env);
         let client = StellarGrantsContractClient::new(env, &contract_id);
         client.set_global_admin(&admin, &admin);
+        env.as_contract(&contract_id, || {
+            crate::access_control::bootstrap_super_admin(env, &admin).unwrap();
+        });
         (contract_id, admin)
     }
 

@@ -108,9 +108,14 @@ fn prop_proportional_share_sum_invariant() {
                 1i128..=MAX_AMOUNT,
                 prop::collection::vec(1u32..=10_000u32, 1..=10),
             ),
-            |(total, shares)| {
-                let bps_sum: u32 = shares.iter().sum();
-                prop_assume!(bps_sum == 10_000);
+            |(total, weights)| {
+                // Normalize the random weights into shares summing to exactly
+                // 10_000 bps (filtering for an exact sum rejects nearly every case).
+                let weight_sum: u32 = weights.iter().sum();
+                let mut shares: std::vec::Vec<u32> =
+                    weights.iter().map(|w| w * 10_000 / weight_sum).collect();
+                let assigned: u32 = shares.iter().sum();
+                *shares.last_mut().unwrap() += 10_000 - assigned;
 
                 let mut total_distributed = 0i128;
                 for &bps in shares.iter() {

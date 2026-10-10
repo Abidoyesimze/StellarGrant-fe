@@ -229,27 +229,23 @@ mod tests {
     fn test_category_stats_reads_tagged_grants() {
         let env = Env::default();
         env.mock_all_auths();
-
+        let contract_id = env.register(crate::StellarGrantsContract, ());
         let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
         let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            Storage::set_global_admin(&env, &admin);
+            setup_grant(&env, 1, &owner, GrantStatus::Active, 1000);
+            setup_grant(&env, 2, &owner, GrantStatus::Completed, 2000);
+        });
 
-        let cat_id = crate::grant_tags::create_category(
-            &env,
-            &admin,
-            String::from_str(&env, "Infrastructure"),
-            Vec::new(&env),
-        )
-        .unwrap();
-
-        setup_grant(&env, 1, &owner, GrantStatus::Active, 1000);
-        setup_grant(&env, 2, &owner, GrantStatus::Completed, 2000);
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let cat_id = client.tags_create_category(&admin, &String::from_str(&env, "Infrastructure"), &Vec::new(&env));
 
         let no_tags = Vec::new(&env);
-        crate::grant_tags::tag_grant(&env, &owner, 1, Some(cat_id), None, no_tags.clone()).unwrap();
-        crate::grant_tags::tag_grant(&env, &owner, 2, Some(cat_id), None, no_tags).unwrap();
+        client.tags_tag_grant(&owner, &1, &Some(cat_id), &None, &no_tags.clone());
+        client.tags_tag_grant(&owner, &2, &Some(cat_id), &None, &no_tags);
 
-        let stats = category_stats(&env, cat_id);
+        let stats = client.analytics_category_stats(&cat_id);
         assert_eq!(stats.total_grants, 2);
         assert_eq!(stats.completed_grants, 1);
         assert_eq!(stats.total_funded, 3000);
@@ -263,21 +259,15 @@ mod tests {
     fn test_avg_completion_ledgers_computed_correctly() {
         let env = Env::default();
         env.mock_all_auths();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
 
         let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
         let owner = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            Storage::set_global_admin(&env, &admin);
 
-        let cat_id = crate::grant_tags::create_category(
-            &env,
-            &admin,
-            String::from_str(&env, "Infrastructure"),
-            Vec::new(&env),
-        )
-        .unwrap();
-
-        // Create a grant with timestamp 100
-        let grant = Grant {
+            // Create a grant with timestamp 100
+            let grant = Grant {
             id: 1,
             owner: owner.clone(),
             title: String::from_str(&env, "Grant"),
@@ -294,11 +284,11 @@ mod tests {
             reason: None,
             timestamp: 100,
             require_compliance: None,
-        };
-        Storage::set_grant(&env, 1, &grant);
+            };
+            Storage::set_grant(&env, 1, &grant);
 
-        // Create milestones with status_updated_at timestamps
-        let milestone0 = Milestone {
+            // Create milestones with status_updated_at timestamps
+            let milestone0 = Milestone {
             idx: 0,
             description: String::from_str(&env, "M1"),
             amount: 500,
@@ -313,10 +303,10 @@ mod tests {
             deadline: None,
             reviewer_count_snapshot: 0,
             reviewer_list_snapshot: soroban_sdk::Vec::new(&env),
-        };
-        Storage::set_milestone(&env, 1, 0, &milestone0);
+            };
+            Storage::set_milestone(&env, 1, 0, &milestone0);
 
-        let milestone1 = Milestone {
+            let milestone1 = Milestone {
             idx: 1,
             description: String::from_str(&env, "M2"),
             amount: 500,
@@ -331,13 +321,21 @@ mod tests {
             deadline: None,
             reviewer_count_snapshot: 0,
             reviewer_list_snapshot: soroban_sdk::Vec::new(&env),
-        };
-        Storage::set_milestone(&env, 1, 1, &milestone1);
+            };
+            Storage::set_milestone(&env, 1, 1, &milestone1);
+        });
+
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let cat_id = client.tags_create_category(
+            &admin,
+            &String::from_str(&env, "Infrastructure"),
+            &Vec::new(&env),
+        );
 
         let no_tags = Vec::new(&env);
-        crate::grant_tags::tag_grant(&env, &owner, 1, Some(cat_id), None, no_tags).unwrap();
+        client.tags_tag_grant(&owner, &1, &Some(cat_id), &None, &no_tags);
 
-        let stats = category_stats(&env, cat_id);
+        let stats = client.analytics_category_stats(&cat_id);
         // Duration = 400 (last milestone status_updated_at) - 100 (grant timestamp) = 300
         assert_eq!(stats.avg_completion_ledgers, 300);
     }
@@ -349,6 +347,8 @@ mod tests {
     #[test]
     fn test_stale_snapshot_triggers_rebuild() {
         let env = Env::default();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        env.as_contract(&contract_id, || {
 
         // Seed a window so build_snapshot has something to compute against.
         record(&env, Symbol::new(&env, "milestone_completion_time"), 100);
@@ -383,5 +383,6 @@ mod tests {
             fetched.snapshot_at >= snap1.snapshot_at,
             "snapshot_at timestamp monotonic"
         );
+        });
     }
 }

@@ -444,9 +444,15 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env, Vec};
 
+    /// Opens an escrow backed by a real token, with the contract pre-funded so
+    /// release and refund transfers succeed. Call inside the contract frame.
     fn setup(env: &Env, grant_id: u64) -> (Address, Address) {
         let owner = Address::generate(env);
-        let token = Address::generate(env);
+        let token = env
+            .register_stellar_asset_contract_v2(Address::generate(env))
+            .address();
+        token::StellarAssetClient::new(env, &token)
+            .mint(&env.current_contract_address(), &1_000_000);
         let _ = open(env, grant_id, &owner, &token);
         (owner, token)
     }
@@ -454,135 +460,156 @@ mod tests {
     #[test]
     fn test_open_escrow_account() {
         let env = Env::default();
-        let grant_id = 1u64;
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
 
-        let result = open(&env, grant_id, &owner, &token);
-        assert_eq!(result, Ok(()));
+            let result = open(&env, grant_id, &owner, &token);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id);
-        assert!(account.is_some());
-        let acc = account.unwrap();
-        assert_eq!(acc.balance, 0);
-        assert_eq!(acc.total_deposited, 0);
-        assert_eq!(acc.total_released, 0);
-        assert_eq!(acc.locked, false);
+            let account = Storage::get_escrow_account(&env, grant_id);
+            assert!(account.is_some());
+            let acc = account.unwrap();
+            assert_eq!(acc.balance, 0);
+            assert_eq!(acc.total_deposited, 0);
+            assert_eq!(acc.total_released, 0);
+            assert_eq!(acc.locked, false);
+        });
     }
 
     #[test]
     fn test_open_escrow_already_exists() {
         let env = Env::default();
-        let grant_id = 1u64;
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
 
-        let _ = open(&env, grant_id, &owner, &token);
-        let result = open(&env, grant_id, &owner, &token);
-        assert_eq!(result, Err(ContractError::EscrowAlreadyOpen));
+            let _ = open(&env, grant_id, &owner, &token);
+            let result = open(&env, grant_id, &owner, &token);
+            assert_eq!(result, Err(ContractError::EscrowAlreadyOpen));
+        });
     }
 
     #[test]
     fn test_lock_unlock() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let result = lock(&env, grant_id);
-        assert_eq!(result, Ok(()));
+            let result = lock(&env, grant_id);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.locked, true);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.locked, true);
 
-        let result = unlock(&env, grant_id);
-        assert_eq!(result, Ok(()));
+            let result = unlock(&env, grant_id);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.locked, false);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.locked, false);
+        });
     }
 
     #[test]
     fn test_release_updates_balance() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let recipient = Address::generate(&env);
-        let result = release(&env, grant_id, &recipient, 500);
-        assert_eq!(result, Ok(()));
+            let recipient = Address::generate(&env);
+            let result = release(&env, grant_id, &recipient, 500);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 500);
-        assert_eq!(account.total_released, 500);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 500);
+            assert_eq!(account.total_released, 500);
+        });
     }
 
     #[test]
     fn test_release_locked_escrow() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        account.locked = true;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            account.locked = true;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let recipient = Address::generate(&env);
-        let result = release(&env, grant_id, &recipient, 500);
-        assert_eq!(result, Err(ContractError::EscrowLocked));
+            let recipient = Address::generate(&env);
+            let result = release(&env, grant_id, &recipient, 500);
+            assert_eq!(result, Err(ContractError::EscrowLocked));
+        });
     }
 
     #[test]
     fn test_release_insufficient_balance() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 0);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 0);
 
-        let recipient = Address::generate(&env);
-        let result = release(&env, grant_id, &recipient, 500);
-        assert_eq!(result, Err(ContractError::InvalidInput));
+            let recipient = Address::generate(&env);
+            let result = release(&env, grant_id, &recipient, 500);
+            assert_eq!(result, Err(ContractError::InvalidInput));
+        });
     }
 
     #[test]
     fn test_refund_single_funder() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder = Address::generate(&env);
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let funder = Address::generate(&env);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let ledger = FunderLedger {
-            funder: funder.clone(),
-            contributed: 500,
-            refunded: 0,
-            last_contribution_at: 0,
-        };
-        Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
+            let ledger = FunderLedger {
+                funder: funder.clone(),
+                contributed: 500,
+                refunded: 0,
+                last_contribution_at: 0,
+            };
+            Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
 
-        let result = refund(&env, grant_id, &funder);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 500);
+            let result = refund(&env, grant_id, &funder);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), 500);
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 500);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 500);
 
-        let ledger = Storage::get_funder_ledger(&env, grant_id, &funder).unwrap();
-        assert_eq!(ledger.refunded, 500);
+            let ledger = Storage::get_funder_ledger(&env, grant_id, &funder).unwrap();
+            assert_eq!(ledger.refunded, 500);
+        });
     }
 
     // Issue #890: refund/refund_all must respect the dispute lock the same
@@ -592,122 +619,137 @@ mod tests {
     fn test_refund_rejects_when_locked() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder = Address::generate(&env);
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        account.locked = true;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let funder = Address::generate(&env);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            account.locked = true;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let ledger = FunderLedger {
-            funder: funder.clone(),
-            contributed: 500,
-            refunded: 0,
-            last_contribution_at: 0,
-        };
-        Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
+            let ledger = FunderLedger {
+                funder: funder.clone(),
+                contributed: 500,
+                refunded: 0,
+                last_contribution_at: 0,
+            };
+            Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
 
-        let result = refund(&env, grant_id, &funder);
-        assert_eq!(result, Err(ContractError::EscrowLocked));
+            let result = refund(&env, grant_id, &funder);
+            assert_eq!(result, Err(ContractError::EscrowLocked));
 
-        // Balance must be untouched.
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 1000);
+            // Balance must be untouched.
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 1000);
+        });
     }
 
     #[test]
     fn test_refund_all_rejects_when_locked() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder = Address::generate(&env);
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        account.locked = true;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let funder = Address::generate(&env);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            account.locked = true;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let ledger = FunderLedger {
-            funder: funder.clone(),
-            contributed: 1000,
-            refunded: 0,
-            last_contribution_at: 0,
-        };
-        Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
+            let ledger = FunderLedger {
+                funder: funder.clone(),
+                contributed: 1000,
+                refunded: 0,
+                last_contribution_at: 0,
+            };
+            Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
 
-        let result = refund_all(&env, grant_id);
-        assert_eq!(result, Err(ContractError::EscrowLocked));
+            let result = refund_all(&env, grant_id);
+            assert_eq!(result, Err(ContractError::EscrowLocked));
 
-        // Balance must be untouched.
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 1000);
+            // Balance must be untouched.
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 1000);
+        });
     }
 
     #[test]
     fn test_refund_no_refundable_amount() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder = Address::generate(&env);
-        let result = refund(&env, grant_id, &funder);
-        assert_eq!(result, Err(ContractError::NoRefundableAmount));
+            let funder = Address::generate(&env);
+            let result = refund(&env, grant_id, &funder);
+            assert_eq!(result, Err(ContractError::NoRefundableAmount));
+        });
     }
 
     #[test]
     fn test_refund_all_empty_escrow() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let result = refund_all(&env, grant_id);
-        assert_eq!(result, Ok(()));
+            let result = refund_all(&env, grant_id);
+            assert_eq!(result, Ok(()));
+        });
     }
 
     #[test]
     fn test_refund_all_multiple_funders() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder1 = Address::generate(&env);
-        let funder2 = Address::generate(&env);
+            let funder1 = Address::generate(&env);
+            let funder2 = Address::generate(&env);
 
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let ledger1 = FunderLedger {
-            funder: funder1.clone(),
-            contributed: 600,
-            refunded: 0,
-            last_contribution_at: 0,
-        };
-        let ledger2 = FunderLedger {
-            funder: funder2.clone(),
-            contributed: 400,
-            refunded: 0,
-            last_contribution_at: 0,
-        };
-        Storage::set_funder_ledger(&env, grant_id, &funder1, &ledger1);
-        Storage::set_funder_ledger(&env, grant_id, &funder2, &ledger2);
+            let ledger1 = FunderLedger {
+                funder: funder1.clone(),
+                contributed: 600,
+                refunded: 0,
+                last_contribution_at: 0,
+            };
+            let ledger2 = FunderLedger {
+                funder: funder2.clone(),
+                contributed: 400,
+                refunded: 0,
+                last_contribution_at: 0,
+            };
+            Storage::set_funder_ledger(&env, grant_id, &funder1, &ledger1);
+            Storage::set_funder_ledger(&env, grant_id, &funder2, &ledger2);
 
-        let mut funders = Vec::new(&env);
-        funders.push_back(funder1.clone());
-        funders.push_back(funder2.clone());
-        Storage::set_escrow_funders_list(&env, grant_id, &funders);
+            let mut funders = Vec::new(&env);
+            funders.push_back(funder1.clone());
+            funders.push_back(funder2.clone());
+            Storage::set_escrow_funders_list(&env, grant_id, &funders);
 
-        let result = refund_all(&env, grant_id);
-        assert_eq!(result, Ok(()));
+            let result = refund_all(&env, grant_id);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 0);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 0);
+        });
     }
 
     #[test]
@@ -794,93 +836,105 @@ mod tests {
     fn test_release_to_funders() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder1 = Address::generate(&env);
-        let funder2 = Address::generate(&env);
+            let funder1 = Address::generate(&env);
+            let funder2 = Address::generate(&env);
 
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let fund1 = GrantFund {
-            funder: funder1.clone(),
-            amount: 600,
-        };
-        let fund2 = GrantFund {
-            funder: funder2.clone(),
-            amount: 400,
-        };
-        let mut funders = Vec::new(&env);
-        funders.push_back(fund1);
-        funders.push_back(fund2);
+            let fund1 = GrantFund {
+                funder: funder1.clone(),
+                amount: 600,
+            };
+            let fund2 = GrantFund {
+                funder: funder2.clone(),
+                amount: 400,
+            };
+            let mut funders = Vec::new(&env);
+            funders.push_back(fund1);
+            funders.push_back(fund2);
 
-        let result = release_to_funders(&env, grant_id, &funders, 500);
-        assert_eq!(result, Ok(()));
+            let result = release_to_funders(&env, grant_id, &funders, 500);
+            assert_eq!(result, Ok(()));
 
-        let account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        assert_eq!(account.balance, 500);
-        assert_eq!(account.total_released, 500);
+            let account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            assert_eq!(account.balance, 500);
+            assert_eq!(account.total_released, 500);
+        });
     }
 
     #[test]
     fn test_release_to_funders_locked() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
-        account.balance = 1000;
-        account.locked = true;
-        Storage::set_escrow_account(&env, grant_id, &account);
+            let mut account = Storage::get_escrow_account(&env, grant_id).unwrap();
+            account.balance = 1000;
+            account.locked = true;
+            Storage::set_escrow_account(&env, grant_id, &account);
 
-        let fund1 = GrantFund {
-            funder: Address::generate(&env),
-            amount: 600,
-        };
-        let mut funders = Vec::new(&env);
-        funders.push_back(fund1);
+            let fund1 = GrantFund {
+                funder: Address::generate(&env),
+                amount: 600,
+            };
+            let mut funders = Vec::new(&env);
+            funders.push_back(fund1);
 
-        let result = release_to_funders(&env, grant_id, &funders, 500);
-        assert_eq!(result, Err(ContractError::EscrowLocked));
+            let result = release_to_funders(&env, grant_id, &funders, 500);
+            assert_eq!(result, Err(ContractError::EscrowLocked));
+        });
     }
 
     #[test]
     fn test_get_account() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let result = get_account(&env, grant_id);
-        assert!(result.is_ok());
-        let account = result.unwrap();
-        assert_eq!(account.balance, 0);
-        assert_eq!(account.total_deposited, 0);
+            let result = get_account(&env, grant_id);
+            assert!(result.is_ok());
+            let account = result.unwrap();
+            assert_eq!(account.balance, 0);
+            assert_eq!(account.total_deposited, 0);
+        });
     }
 
     #[test]
     fn test_get_funder_ledger() {
         let env = Env::default();
         env.mock_all_auths();
-        let grant_id = 1u64;
-        let (owner, _token) = setup(&env, grant_id);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let grant_id = 1u64;
+            let (owner, _token) = setup(&env, grant_id);
 
-        let funder = Address::generate(&env);
-        let ledger = FunderLedger {
-            funder: funder.clone(),
-            contributed: 500,
-            refunded: 0,
-            last_contribution_at: 100,
-        };
-        Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
+            let funder = Address::generate(&env);
+            let ledger = FunderLedger {
+                funder: funder.clone(),
+                contributed: 500,
+                refunded: 0,
+                last_contribution_at: 100,
+            };
+            Storage::set_funder_ledger(&env, grant_id, &funder, &ledger);
 
-        let result = get_funder_ledger(&env, grant_id, &funder);
-        assert!(result.is_some());
-        let retrieved = result.unwrap();
-        assert_eq!(retrieved.contributed, 500);
-        assert_eq!(retrieved.refunded, 0);
+            let result = get_funder_ledger(&env, grant_id, &funder);
+            assert!(result.is_some());
+            let retrieved = result.unwrap();
+            assert_eq!(retrieved.contributed, 500);
+            assert_eq!(retrieved.refunded, 0);
+        });
     }
 }

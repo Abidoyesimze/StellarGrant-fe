@@ -7,7 +7,10 @@ pub fn safe_add(a: i128, b: i128) -> Result<i128, ContractError> {
 
 /// Safely subtract b from a; returns Err(InvalidInput) if result < 0.
 pub fn safe_sub(a: i128, b: i128) -> Result<i128, ContractError> {
-    a.checked_sub(b).ok_or(ContractError::InvalidInput)
+    match a.checked_sub(b) {
+        Some(result) if result >= 0 => Ok(result),
+        _ => Err(ContractError::InvalidInput),
+    }
 }
 
 /// Compute `basis_points / 10_000` of `amount` safely without intermediate overflow.
@@ -134,9 +137,9 @@ mod tests {
     }
 
     #[test]
-    fn test_basis_points_of_overflow() {
-        let result = basis_points_of(i128::MAX, 10000);
-        assert!(result.is_err());
+    fn test_basis_points_of_no_intermediate_overflow() {
+        // The split-multiply avoids overflowing on `amount * bps`.
+        assert_eq!(basis_points_of(i128::MAX, 10000), Ok(i128::MAX));
     }
 
     #[test]

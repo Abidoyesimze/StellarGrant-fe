@@ -208,89 +208,102 @@ mod tests {
     fn mint_returns_token_id_and_nft_stored() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
 
-        let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        assert_eq!(token_id, 1);
+            let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            assert_eq!(token_id, 1);
 
-        let nft = get_nft(&env, 1, 0).unwrap();
-        assert_eq!(nft.owner, owner);
-        assert_eq!(nft.grant_id, 1);
-        assert_eq!(nft.milestone_idx, 0);
-        assert!(!nft.is_transferable);
+            let nft = get_nft(&env, 1, 0).unwrap();
+            assert_eq!(nft.owner, owner);
+            assert_eq!(nft.grant_id, 1);
+            assert_eq!(nft.milestone_idx, 0);
+            assert!(!nft.is_transferable);
+        });
     }
 
     #[test]
     fn get_by_owner_returns_correct_list() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
-        seed_milestone(&env, 1, 1, MilestoneState::Paid);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
+            seed_milestone(&env, 1, 1, MilestoneState::Paid);
 
-        mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        mint(&env, 1, 1, &owner, sample_metadata(&env)).unwrap();
+            mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            mint(&env, 1, 1, &owner, sample_metadata(&env)).unwrap();
 
-        let owned = get_by_owner(&env, &owner);
-        assert_eq!(owned.len(), 2);
+            let owned = get_by_owner(&env, &owner);
+            assert_eq!(owned.len(), 2);
+        });
     }
 
     #[test]
     fn transfer_soulbound_fails() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let recipient = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
 
-        let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        let result = transfer(&env, &owner, &recipient, token_id);
-        assert_eq!(result, Err(ContractError::NftNotTransferable));
+            let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            let result = transfer(&env, &owner, &recipient, token_id);
+            assert_eq!(result, Err(ContractError::NftNotTransferable));
+        });
     }
 
     #[test]
     fn transfer_after_unlock_succeeds() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+            let owner = Address::generate(&env);
+            let recipient = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
 
-        let owner = Address::generate(&env);
-        let recipient = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
+            let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            set_transferable(&env, &admin, token_id, true).unwrap();
 
-        let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        set_transferable(&env, &admin, token_id, true).unwrap();
+            transfer(&env, &owner, &recipient, token_id).unwrap();
 
-        transfer(&env, &owner, &recipient, token_id).unwrap();
-
-        let nft = get_nft(&env, 1, 0).unwrap();
-        assert_eq!(nft.owner, recipient);
-        assert_eq!(get_by_owner(&env, &owner).len(), 0);
-        assert_eq!(get_by_owner(&env, &recipient).len(), 1);
+            let nft = get_nft(&env, 1, 0).unwrap();
+            assert_eq!(nft.owner, recipient);
+            assert_eq!(get_by_owner(&env, &owner).len(), 0);
+            assert_eq!(get_by_owner(&env, &recipient).len(), 1);
+        });
     }
 
     #[test]
     fn verify_nft_detects_tampering() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+            let owner = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
+            let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            assert!(verify_nft(&env, token_id));
 
-        let owner = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
-        let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        assert!(verify_nft(&env, token_id));
+            // Tamper: overwrite proof_hash with zeroes
+            let mut nft = get_nft(&env, 1, 0).unwrap();
+            nft.proof_hash = Bytes::new(&env);
+            Storage::set_milestone_nft(&env, &nft);
 
-        // Tamper: overwrite proof_hash with zeroes
-        let mut nft = get_nft(&env, 1, 0).unwrap();
-        nft.proof_hash = Bytes::new(&env);
-        Storage::set_milestone_nft(&env, &nft);
-
-        assert!(!verify_nft(&env, token_id));
+            assert!(!verify_nft(&env, token_id));
+        });
     }
 
     #[test]
@@ -309,35 +322,40 @@ mod tests {
     fn verify_nft_detects_owner_tampering() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let attacker = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Approved);
+            let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
+            assert!(verify_nft(&env, token_id));
 
-        let owner = Address::generate(&env);
-        let attacker = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Approved);
-        let token_id = mint(&env, 1, 0, &owner, sample_metadata(&env)).unwrap();
-        assert!(verify_nft(&env, token_id));
+            // Tamper: change stored owner address on the NFT
+            let mut nft = get_nft(&env, 1, 0).unwrap();
+            nft.owner = attacker;
+            Storage::set_milestone_nft(&env, &nft);
 
-        // Tamper: change stored owner address on the NFT
-        let mut nft = get_nft(&env, 1, 0).unwrap();
-        nft.owner = attacker;
-        Storage::set_milestone_nft(&env, &nft);
-
-        assert!(!verify_nft(&env, token_id));
+            assert!(!verify_nft(&env, token_id));
+        });
     }
 
     #[test]
     fn mint_rejects_unapproved_milestones() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        seed_milestone(&env, 1, 0, MilestoneState::Pending);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            seed_milestone(&env, 1, 0, MilestoneState::Pending);
 
-        assert_eq!(
-            mint(&env, 1, 0, &owner, sample_metadata(&env)),
-            Err(ContractError::InvalidState)
-        );
-        assert_eq!(
-            mint(&env, 1, 1, &owner, sample_metadata(&env)),
-            Err(ContractError::MilestoneNotFound)
-        );
+            assert_eq!(
+                mint(&env, 1, 0, &owner, sample_metadata(&env)),
+                Err(ContractError::InvalidState)
+            );
+            assert_eq!(
+                mint(&env, 1, 1, &owner, sample_metadata(&env)),
+                Err(ContractError::MilestoneNotFound)
+            );
+        });
     }
 }

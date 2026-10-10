@@ -256,12 +256,11 @@ fn prop_cancel_refund_sum_equals_escrow() {
 
 #[test]
 fn prop_release_balance_conservation() {
-    // Drives real `escrow::release` + `refund_all` through `grant_complete`.
-    // The owner is paid the milestone net of the protocol fee (`fees::compute_fee`);
-    // `deduct_and_split_fee` only *books* the fee (it doesn't transfer it out),
-    // so `refund_all` sweeps the whole remaining escrow — the un-earmarked
-    // funding plus the booked fee — back to the funder. Net effect:
-    //   owner_payout + funder_refund == gross escrow, escrow fully drained.
+    // Drives real `escrow::release` + `refund_partial` through `grant_complete`.
+    // The owner is paid the milestone net of the protocol fee (`fees::compute_fee`),
+    // and only the surplus above the approved milestones is refunded to the
+    // funder (issue #1025); the booked fee stays with the protocol. Net effect:
+    //   owner_payout + funder_refund + fee == gross escrow.
     let mut runner = TestRunner::new(Config::with_cases(32));
     runner
         .run(
@@ -313,9 +312,9 @@ fn prop_release_balance_conservation() {
                 let owner_bal = f.token_client.balance(&owner);
                 let funder_bal = f.token_client.balance(&funder);
                 prop_assert_eq!(owner_bal, milestone_amount - fee);
-                prop_assert_eq!(funder_bal, extra + fee);
-                prop_assert_eq!(owner_bal + funder_bal, total);
-                prop_assert_eq!(f.client.get_grant(&gid).escrow_balance, 0);
+                prop_assert_eq!(funder_bal, extra);
+                prop_assert_eq!(f.token_client.balance(&f.client.address), fee);
+                prop_assert_eq!(owner_bal + funder_bal + fee, total);
                 Ok(())
             },
         )
@@ -449,8 +448,13 @@ fn prop_basis_points_partition_never_exceeds_total() {
                 prop::collection::vec(0u32..=10_000u32, 1..=10),
             ),
             |(total, shares)| {
+                // Clamp each share to the unallocated remainder so the shares
+                // form a partition (sum <= 100%).
+                let mut remaining_bps = 10_000u32;
                 let mut sum = 0i128;
                 for &bps in &shares {
+                    let bps = bps.min(remaining_bps);
+                    remaining_bps -= bps;
                     let part = stellar_grants::math::basis_points_of(total, bps).unwrap();
                     sum = sum.saturating_add(part);
                 }

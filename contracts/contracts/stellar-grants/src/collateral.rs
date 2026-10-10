@@ -136,6 +136,20 @@ pub fn forfeit(
         return Err(ContractError::Unauthorized);
     }
 
+    forfeit_authorized(env, grant_id, contributor, forfeit_bps, reason)
+}
+
+/// Forfeit without checking a caller. For internal paths that have already
+/// authorized the operation (or are permissionless, like timer-driven
+/// cancellation); calling `forfeit` there would re-`require_auth` an address
+/// the invocation either already authorized or never had signed.
+pub(crate) fn forfeit_authorized(
+    env: &Env,
+    grant_id: u64,
+    contributor: &Address,
+    forfeit_bps: u32,
+    reason: String,
+) -> Result<i128, ContractError> {
     crate::reentrancy::protect(env)?;
     if forfeit_bps > 10_000 {
         return Err(ContractError::InvalidInput);
@@ -282,10 +296,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_set_and_get_requirement() {
-        let env = Env::default();
-        env.mock_all_auths();
+    macro_rules! collateral_test {
+        ($name:ident, |$env:ident, $contract_id:ident| $body:block) => {
+            #[test]
+            fn $name() {
+                let $env = Env::default();
+                $env.mock_all_auths();
+                let $contract_id = $env.register(crate::StellarGrantsContract, ());
+                $env.as_contract(&$contract_id, || $body);
+            }
+        };
+    }
+
+    collateral_test!(test_set_and_get_requirement, |env, contract_id| {
         let owner = Address::generate(&env);
         let token = Address::generate(&env);
 
@@ -303,21 +326,17 @@ mod tests {
         let got = get_requirement(&env, 1).unwrap();
         assert_eq!(got.amount, 500);
         assert_eq!(got.forfeit_on_abandon_bps, 1000);
-    }
+    });
 
-    #[test]
-    fn test_require_deposited_no_requirement_passes() {
-        let env = Env::default();
+    collateral_test!(test_require_deposited_no_requirement_passes, |env, contract_id| {
         let contributor = Address::generate(&env);
         // No requirement set -> should pass
         assert_eq!(require_deposited(&env, 1, &contributor), Ok(()));
-    }
+    });
 
-    #[test]
-    fn test_require_deposited_blocks_archetype_requires_staking() {
+    collateral_test!(test_require_deposited_blocks_archetype_requires_staking, |env, contract_id| {
         use crate::types::GrantSafetyFlags;
 
-        let env = Env::default();
         let contributor = Address::generate(&env);
 
         // No requirement configured, and the grant's archetype (issue #912)
@@ -335,12 +354,9 @@ mod tests {
             require_deposited(&env, 1, &contributor),
             Err(ContractError::CollateralNotDeposited)
         );
-    }
+    });
 
-    #[test]
-    fn test_require_deposited_no_deposit_fails() {
-        let env = Env::default();
-        env.mock_all_auths();
+    collateral_test!(test_require_deposited_no_deposit_fails, |env, contract_id| {
         let owner = Address::generate(&env);
         let token = Address::generate(&env);
 
@@ -359,12 +375,9 @@ mod tests {
             require_deposited(&env, 1, &owner),
             Err(ContractError::CollateralNotDeposited)
         );
-    }
+    });
 
-    #[test]
-    fn test_unauthorized_cannot_set_requirement() {
-        let env = Env::default();
-        env.mock_all_auths();
+    collateral_test!(test_unauthorized_cannot_set_requirement, |env, contract_id| {
         let owner = Address::generate(&env);
         let stranger = Address::generate(&env);
         let token = Address::generate(&env);
@@ -383,19 +396,20 @@ mod tests {
             set_requirement(&env, &stranger, 1, &req),
             Err(ContractError::Unauthorized)
         );
-    }
+    });
 
     #[test]
     fn test_forfeit_calculates_correct_amount() {
         let env = Env::default();
         env.mock_all_auths();
-        let contributor = Address::generate(&env);
-        let token = Address::generate(&env);
+        let contract_id = env.register(crate::StellarGrantsContract, ());
         let owner = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(owner.clone()).address();
 
         // Manually set up a grant
-        let grant = make_grant(&env, &owner);
-        Storage::set_grant(&env, 1, &grant);
+        let mut grant = make_grant(&env, &owner);
+        grant.token = token.clone();
 
         // Manually set up a deposit.
         let deposit = CollateralDeposit {
@@ -407,17 +421,24 @@ mod tests {
             deposited_at: 0,
             forfeited_amount: 0,
         };
-        Storage::set_collateral_deposit(&env, 1, &contributor, &deposit);
-
         // Setup treasury for forfeit destination
-        Storage::set_treasury(&env, &Address::generate(&env));
+        let treasury = Address::generate(&env);
 
         let reason = soroban_sdk::String::from_str(&env, "dispute lost");
-        // 2000 bps = 20% of 1000 = 200
-        let result = forfeit(&env, &owner, 1, &contributor, 2000, reason.clone());
-        assert_eq!(result.unwrap(), 200);
+        env.as_contract(&contract_id, || {
+            Storage::set_grant(&env, 1, &grant);
+            Storage::set_global_admin(&env, &owner);
+            Storage::set_collateral_deposit(&env, 1, &contributor, &deposit);
+            Storage::set_treasury(&env, &treasury);
+        });
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1000);
 
-        let updated = get_deposit(&env, 1, &contributor).unwrap();
+        // 2000 bps = 20% of 1000 = 200
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let result = client.collateral_forfeit(&owner, &1, &contributor, &2000, &reason);
+        assert_eq!(result, 200);
+
+        let updated = client.collateral_get_deposit(&1, &contributor).unwrap();
         assert_eq!(updated.forfeited_amount, 200);
         assert_eq!(updated.status, CollateralStatus::PartiallyForfeited);
     }
@@ -426,13 +447,14 @@ mod tests {
     fn test_full_forfeit_marks_forfeited() {
         let env = Env::default();
         env.mock_all_auths();
-        let contributor = Address::generate(&env);
-        let token = Address::generate(&env);
+        let contract_id = env.register(crate::StellarGrantsContract, ());
         let owner = Address::generate(&env);
+        let contributor = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(owner.clone()).address();
 
         // Manually set up a grant
-        let grant = make_grant(&env, &owner);
-        Storage::set_grant(&env, 1, &grant);
+        let mut grant = make_grant(&env, &owner);
+        grant.token = token.clone();
 
         let deposit = CollateralDeposit {
             grant_id: 1,
@@ -443,16 +465,23 @@ mod tests {
             deposited_at: 0,
             forfeited_amount: 0,
         };
-        Storage::set_collateral_deposit(&env, 1, &contributor, &deposit);
 
         // Setup treasury
-        Storage::set_treasury(&env, &Address::generate(&env));
+        let treasury = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            Storage::set_grant(&env, 1, &grant);
+            Storage::set_global_admin(&env, &owner);
+            Storage::set_collateral_deposit(&env, 1, &contributor, &deposit);
+            Storage::set_treasury(&env, &treasury);
+        });
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&contract_id, &1000);
 
         let reason = soroban_sdk::String::from_str(&env, "abandoned");
-        let result = forfeit(&env, &owner, 1, &contributor, 10000, reason.clone());
-        assert_eq!(result.unwrap(), 1000);
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let result = client.collateral_forfeit(&owner, &1, &contributor, &10000, &reason);
+        assert_eq!(result, 1000);
 
-        let updated = get_deposit(&env, 1, &contributor).unwrap();
+        let updated = client.collateral_get_deposit(&1, &contributor).unwrap();
         assert_eq!(updated.status, CollateralStatus::Forfeited);
         assert_eq!(updated.forfeited_amount, 1000);
     }

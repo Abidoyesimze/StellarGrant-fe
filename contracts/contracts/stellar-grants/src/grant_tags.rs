@@ -312,20 +312,23 @@ mod tests {
     fn test_find_by_tag_no_collision_for_same_length_tags() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let owner = Address::generate(&env);
+        let mut tags1 = Vec::new(&env);
+        tags1.push_back(String::from_str(&env, "rust"));
+        let mut tags2 = Vec::new(&env);
+        tags2.push_back(String::from_str(&env, "defi"));
 
         env.as_contract(&contract_id, || {
-            let owner = Address::generate(&env);
             setup_grant(&env, 1, &owner);
             setup_grant(&env, 2, &owner);
-
-            let mut tags1 = Vec::new(&env);
-            tags1.push_back(String::from_str(&env, "rust"));
             tag_grant(&env, &owner, 1, None, None, tags1).unwrap();
+        });
 
-            let mut tags2 = Vec::new(&env);
-            tags2.push_back(String::from_str(&env, "defi"));
+        env.as_contract(&contract_id, || {
             tag_grant(&env, &owner, 2, None, None, tags2).unwrap();
+        });
 
+        env.as_contract(&contract_id, || {
             let rust_results = find_by_tag(&env, &String::from_str(&env, "rust"), 0, 50);
             let defi_results = find_by_tag(&env, &String::from_str(&env, "defi"), 0, 50);
 
@@ -340,25 +343,34 @@ mod tests {
     fn test_find_by_category_returns_tagged_grants() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let owner = Address::generate(&env);
 
-        env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
+        let cat_id = env.as_contract(&contract_id, || {
             Storage::set_global_admin(&env, &admin);
-            let owner = Address::generate(&env);
-
             let subs = Vec::new(&env);
-            let cat_id =
-                create_category(&env, &admin, String::from_str(&env, "Infrastructure"), subs)
-                    .unwrap();
-
+            let cat_id = create_category(
+                &env,
+                &admin,
+                String::from_str(&env, "Infrastructure"),
+                subs,
+            )
+            .unwrap();
             setup_grant(&env, 10, &owner);
             setup_grant(&env, 20, &owner);
             setup_grant(&env, 30, &owner);
+            cat_id
+        });
 
-            let tags = Vec::new(&env);
+        let tags = Vec::new(&env);
+        env.as_contract(&contract_id, || {
             tag_grant(&env, &owner, 10, Some(cat_id), None, tags.clone()).unwrap();
+        });
+        env.as_contract(&contract_id, || {
             tag_grant(&env, &owner, 20, Some(cat_id), None, tags.clone()).unwrap();
+        });
 
+        env.as_contract(&contract_id, || {
             let results = find_by_category(&env, cat_id, 0, 50);
             assert_eq!(results.len(), 2);
             assert_eq!(results.get(0).unwrap(), 10);
@@ -373,22 +385,24 @@ mod tests {
     fn test_find_by_category_pagination() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let owner = Address::generate(&env);
 
-        env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
+        let cat_id = env.as_contract(&contract_id, || {
             Storage::set_global_admin(&env, &admin);
-            let owner = Address::generate(&env);
-
             let subs = Vec::new(&env);
-            let cat_id =
-                create_category(&env, &admin, String::from_str(&env, "DeFi"), subs).unwrap();
+            create_category(&env, &admin, String::from_str(&env, "DeFi"), subs).unwrap()
+        });
 
-            let tags = Vec::new(&env);
-            for i in 0..5u64 {
+        let tags = Vec::new(&env);
+        for i in 0..5u64 {
+            env.as_contract(&contract_id, || {
                 setup_grant(&env, i, &owner);
                 tag_grant(&env, &owner, i, Some(cat_id), None, tags.clone()).unwrap();
-            }
+            });
+        }
 
+        env.as_contract(&contract_id, || {
             let page1 = find_by_category(&env, cat_id, 0, 2);
             assert_eq!(page1.len(), 2);
             assert_eq!(page1.get(0).unwrap(), 0);
@@ -416,25 +430,32 @@ mod tests {
     fn test_category_index_cleaned_on_retag() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let owner = Address::generate(&env);
+        let subs = Vec::new(&env);
+
+        let cat_a = env.as_contract(&contract_id, || {
+            Storage::set_global_admin(&env, &admin);
+            create_category(&env, &admin, String::from_str(&env, "CatA"), subs.clone()).unwrap()
+        });
+        let cat_b = env.as_contract(&contract_id, || {
+            create_category(&env, &admin, String::from_str(&env, "CatB"), subs).unwrap()
+        });
+        env.as_contract(&contract_id, || {
+            setup_grant(&env, 1, &owner);
+        });
+        let tags = Vec::new(&env);
+        env.as_contract(&contract_id, || {
+            tag_grant(&env, &owner, 1, Some(cat_a), None, tags.clone()).unwrap();
+        });
+        env.as_contract(&contract_id, || {
+            assert_eq!(find_by_category(&env, cat_a, 0, 50).len(), 1);
+        });
 
         env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
-            Storage::set_global_admin(&env, &admin);
-            let owner = Address::generate(&env);
-
-            let subs = Vec::new(&env);
-            let cat_a = create_category(&env, &admin, String::from_str(&env, "CatA"), subs.clone())
-                .unwrap();
-            let cat_b =
-                create_category(&env, &admin, String::from_str(&env, "CatB"), subs).unwrap();
-
-            setup_grant(&env, 1, &owner);
-            let tags = Vec::new(&env);
-
-            tag_grant(&env, &owner, 1, Some(cat_a), None, tags.clone()).unwrap();
-            assert_eq!(find_by_category(&env, cat_a, 0, 50).len(), 1);
-
             tag_grant(&env, &owner, 1, Some(cat_b), None, tags).unwrap();
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(find_by_category(&env, cat_a, 0, 50).len(), 0);
             assert_eq!(find_by_category(&env, cat_b, 0, 50).len(), 1);
         });

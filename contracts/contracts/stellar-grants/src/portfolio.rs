@@ -226,76 +226,91 @@ mod tests {
     #[test]
     fn unregistered_contributor_returns_error() {
         let env = Env::default();
-        let addr = Address::generate(&env);
-        let result = get_portfolio(&env, &addr);
-        assert_eq!(result, Err(ContractError::InvalidInput));
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let addr = Address::generate(&env);
+            let result = get_portfolio(&env, &addr);
+            assert_eq!(result, Err(ContractError::InvalidInput));
+        });
     }
 
     #[test]
     fn portfolio_hash_is_deterministic() {
         let env = Env::default();
-        let contributor = Address::generate(&env);
-        register_contributor(&env, &contributor);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let contributor = Address::generate(&env);
+            register_contributor(&env, &contributor);
 
-        let hash1 = portfolio_hash(&env, &contributor);
-        let hash2 = portfolio_hash(&env, &contributor);
-        assert_eq!(hash1, hash2);
+            let hash1 = portfolio_hash(&env, &contributor);
+            let hash2 = portfolio_hash(&env, &contributor);
+            assert_eq!(hash1, hash2);
+        });
     }
 
     #[test]
     fn earnings_by_token_empty_for_new_contributor() {
         let env = Env::default();
-        let contributor = Address::generate(&env);
-        register_contributor(&env, &contributor);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let contributor = Address::generate(&env);
+            register_contributor(&env, &contributor);
 
-        let earnings = earnings_by_token(&env, &contributor);
-        assert_eq!(earnings.len(), 0);
+            let earnings = earnings_by_token(&env, &contributor);
+            assert_eq!(earnings.len(), 0);
+        });
     }
 
     #[test]
     fn portfolio_reflects_badges() {
         let env = Env::default();
         env.mock_all_auths();
-        let contributor = Address::generate(&env);
-        register_contributor(&env, &contributor);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let contributor = Address::generate(&env);
+            register_contributor(&env, &contributor);
 
-        let portfolio = get_portfolio(&env, &contributor).unwrap();
-        // No badges initially — list should be empty
-        assert_eq!(portfolio.badges.len(), 0);
-        assert_eq!(portfolio.milestones_approved, 2);
+            let portfolio = get_portfolio(&env, &contributor).unwrap();
+            // No badges initially — list should be empty
+            assert_eq!(portfolio.badges.len(), 0);
+            assert_eq!(portfolio.milestones_approved, 2);
+        });
     }
 
     #[test]
     fn get_grant_summary_requires_owner() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let other = Address::generate(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let other = Address::generate(&env);
 
-        // create a grant owned by `owner`
-        let grant = crate::types::Grant {
-            id: 42,
-            owner: owner.clone(),
-            title: String::from_str(&env, "G"),
-            description: String::from_str(&env, "D"),
-            token: Address::generate(&env),
-            status: GrantStatus::Active,
-            total_amount: 0,
-            milestone_amount: 0,
-            reviewers: Vec::new(&env),
-            total_milestones: 1,
-            milestones_paid_out: 0,
-            escrow_balance: 0,
-            funders: Vec::new(&env),
-            reason: None,
-            timestamp: 0,
-            require_compliance: None,
-        };
-        Storage::set_grant(&env, 42, &grant);
+            // create a grant owned by `owner`
+            let grant = crate::types::Grant {
+                id: 42,
+                owner: owner.clone(),
+                title: String::from_str(&env, "G"),
+                description: String::from_str(&env, "D"),
+                token: Address::generate(&env),
+                status: GrantStatus::Active,
+                total_amount: 0,
+                milestone_amount: 0,
+                reviewers: Vec::new(&env),
+                total_milestones: 1,
+                milestones_paid_out: 0,
+                escrow_balance: 0,
+                funders: Vec::new(&env),
+                reason: None,
+                timestamp: 0,
+                require_compliance: None,
+            };
+            Storage::set_grant(&env, 42, &grant);
 
-        // other address should be rejected
-        let res = get_grant_summary(&env, &other, 42);
-        assert_eq!(res, Err(ContractError::Unauthorized));
+            // other address should be rejected
+            let res = get_grant_summary(&env, &other, 42);
+            assert_eq!(res, Err(ContractError::Unauthorized));
+        });
     }
 
     #[test]
@@ -304,47 +319,52 @@ mod tests {
 
         let env = Env::default();
         env.mock_all_auths();
-        let contributor = Address::generate(&env);
 
-        // register contributor with high raw score and old last_action_at
-        let profile = crate::types::ContributorProfile {
-            contributor: contributor.clone(),
-            name: String::from_str(&env, "Alice"),
-            bio: String::from_str(&env, "dev"),
-            skills: Vec::new(&env),
-            github_url: String::from_str(&env, ""),
-            registration_timestamp: 1,
-            reputation_score: 800,
-            grants_count: 0,
-            total_earned: 0,
-            milestones_completed: 0,
-            milestones_rejected: 0,
-            last_action_at: 0,
-        };
-        Storage::set_contributor(&env, contributor.clone(), &profile);
+        crate::test_utils::register_contract(&env);
 
-        // enable linear decay in protocol config and set params
-        let mut cfg = crate::config::default_config();
-        cfg.decay_config.enabled = true;
-        cfg.decay_config.decay_type = crate::types::DecayType::Linear;
-        cfg.decay_config.linear_decay_per_day = 50; // 50 points/day
-        cfg.decay_config.decay_floor = 50;
-        cfg.decay_config.inactivity_threshold_ledgers = 0;
-        Storage::set_protocol_config(&env, &cfg);
+        crate::test_utils::in_contract(&env, || {
+            let contributor = Address::generate(&env);
 
-        // advance ledger far enough to trigger decay (~10 days)
-        env.ledger().set(soroban_sdk::testutils::LedgerInfo {
-            timestamp: 86400 * 10,
-            protocol_version: 25,
-            sequence_number: 1,
-            base_reserve: 10,
-            network_id: Default::default(),
-            min_temp_entry_ttl: 100_000,
-            min_persistent_entry_ttl: 100_000,
-            max_entry_ttl: 1_000_000,
+            // register contributor with high raw score and old last_action_at
+            let profile = crate::types::ContributorProfile {
+                contributor: contributor.clone(),
+                name: String::from_str(&env, "Alice"),
+                bio: String::from_str(&env, "dev"),
+                skills: Vec::new(&env),
+                github_url: String::from_str(&env, ""),
+                registration_timestamp: 1,
+                reputation_score: 800,
+                grants_count: 0,
+                total_earned: 0,
+                milestones_completed: 0,
+                milestones_rejected: 0,
+                last_action_at: 0,
+            };
+            Storage::set_contributor(&env, contributor.clone(), &profile);
+
+            // enable linear decay in protocol config and set params
+            let mut cfg = crate::config::default_config();
+            cfg.decay_config.enabled = true;
+            cfg.decay_config.decay_type = crate::types::DecayType::Linear;
+            cfg.decay_config.linear_decay_per_day = 50; // 50 points/day
+            cfg.decay_config.decay_floor = 50;
+            cfg.decay_config.inactivity_threshold_ledgers = 0;
+            Storage::set_protocol_config(&env, &cfg);
+
+            // advance ledger far enough to trigger decay (~10 days)
+            env.ledger().set(soroban_sdk::testutils::LedgerInfo {
+                timestamp: 86400 * 10,
+                protocol_version: 25,
+                sequence_number: 1,
+                base_reserve: 10,
+                network_id: Default::default(),
+                min_temp_entry_ttl: 100_000,
+                min_persistent_entry_ttl: 100_000,
+                max_entry_ttl: 1_000_000,
+            });
+
+            let portfolio = get_portfolio(&env, &contributor).unwrap();
+            assert!(portfolio.reputation_score < 800);
         });
-
-        let portfolio = get_portfolio(&env, &contributor).unwrap();
-        assert!(portfolio.reputation_score < 800);
     }
 }

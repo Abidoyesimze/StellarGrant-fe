@@ -154,9 +154,18 @@ mod tests {
         Env::default()
     }
 
-    #[test]
-    fn test_default_metrics_are_zero() {
-        let env = setup();
+    macro_rules! metrics_test {
+        ($name:ident, |$env:ident| $body:block) => {
+            #[test]
+            fn $name() {
+                let $env = setup();
+                let contract_id = $env.register(crate::StellarGrantsContract, ());
+                $env.as_contract(&contract_id, || $body);
+            }
+        };
+    }
+
+    metrics_test!(test_default_metrics_are_zero, |env| {
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_created, 0);
         assert_eq!(m.total_grants_active, 0);
@@ -170,11 +179,9 @@ mod tests {
         assert_eq!(m.total_disputes_resolved, 0);
         assert_eq!(m.total_bounties_created, 0);
         assert_eq!(m.total_bounties_awarded, 0);
-    }
+    });
 
-    #[test]
-    fn test_increment_grants_created() {
-        let env = setup();
+    metrics_test!(test_increment_grants_created, |env| {
         increment(&env, MetricField::GrantsCreated, 1);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_created, 1);
@@ -182,39 +189,31 @@ mod tests {
         increment(&env, MetricField::GrantsCreated, 3);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_created, 4);
-    }
+    });
 
-    #[test]
-    fn test_increment_grants_active() {
-        let env = setup();
+    metrics_test!(test_increment_grants_active, |env| {
         increment(&env, MetricField::GrantsActive, 2);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_active, 2);
-    }
+    });
 
-    #[test]
-    fn test_grants_completed_decrements_active() {
-        let env = setup();
+    metrics_test!(test_grants_completed_decrements_active, |env| {
         increment(&env, MetricField::GrantsActive, 5);
         increment(&env, MetricField::GrantsCompleted, 2);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_completed, 2);
         assert_eq!(m.total_grants_active, 3);
-    }
+    });
 
-    #[test]
-    fn test_grants_cancelled_decrements_active() {
-        let env = setup();
+    metrics_test!(test_grants_cancelled_decrements_active, |env| {
         increment(&env, MetricField::GrantsActive, 5);
         increment(&env, MetricField::GrantsCancelled, 1);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_cancelled, 1);
         assert_eq!(m.total_grants_active, 4);
-    }
+    });
 
-    #[test]
-    fn test_milestone_counters() {
-        let env = setup();
+    metrics_test!(test_milestone_counters, |env| {
         increment(&env, MetricField::MilestonesApproved, 3);
         increment(&env, MetricField::MilestonesRejected, 1);
         increment(&env, MetricField::MilestonesPaid, 2);
@@ -222,39 +221,31 @@ mod tests {
         assert_eq!(m.total_milestones_approved, 3);
         assert_eq!(m.total_milestones_rejected, 1);
         assert_eq!(m.total_milestones_paid, 2);
-    }
+    });
 
-    #[test]
-    fn test_dispute_counters() {
-        let env = setup();
+    metrics_test!(test_dispute_counters, |env| {
         increment(&env, MetricField::DisputesRaised, 5);
         increment(&env, MetricField::DisputesResolved, 3);
         let m = get_metrics(&env);
         assert_eq!(m.total_disputes_raised, 5);
         assert_eq!(m.total_disputes_resolved, 3);
-    }
+    });
 
-    #[test]
-    fn test_bounty_counters() {
-        let env = setup();
+    metrics_test!(test_bounty_counters, |env| {
         increment(&env, MetricField::BountiesCreated, 10);
         increment(&env, MetricField::BountiesAwarded, 7);
         let m = get_metrics(&env);
         assert_eq!(m.total_bounties_created, 10);
         assert_eq!(m.total_bounties_awarded, 7);
-    }
+    });
 
-    #[test]
-    fn test_contributors_counter() {
-        let env = setup();
+    metrics_test!(test_contributors_counter, |env| {
         increment(&env, MetricField::ContributorsRegistered, 4);
         let m = get_metrics(&env);
         assert_eq!(m.total_contributors_registered, 4);
-    }
+    });
 
-    #[test]
-    fn test_saturating_add_never_panics() {
-        let env = setup();
+    metrics_test!(test_saturating_add_never_panics, |env| {
         // Set to near max
         let mut m = get_metrics(&env);
         m.total_grants_created = u32::MAX - 1;
@@ -263,21 +254,17 @@ mod tests {
         increment(&env, MetricField::GrantsCreated, 5);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_created, u32::MAX);
-    }
+    });
 
-    #[test]
-    fn test_saturating_sub_never_panics_on_completed() {
-        let env = setup();
+    metrics_test!(test_saturating_sub_never_panics_on_completed, |env| {
         // Active is 0, completing 1 should saturate to 0
         increment(&env, MetricField::GrantsCompleted, 1);
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_completed, 1);
         assert_eq!(m.total_grants_active, 0);
-    }
+    });
 
-    #[test]
-    fn test_multi_action_sequence() {
-        let env = setup();
+    metrics_test!(test_multi_action_sequence, |env| {
         increment(&env, MetricField::GrantsCreated, 3);
         increment(&env, MetricField::GrantsActive, 3);
         increment(&env, MetricField::ContributorsRegistered, 5);
@@ -298,53 +285,43 @@ mod tests {
         assert_eq!(m.total_disputes_raised, 1);
         assert_eq!(m.total_disputes_resolved, 1);
         assert_eq!(m.total_contributors_registered, 5);
-    }
+    });
 
-    #[test]
-    fn test_token_metrics_default() {
-        let env = setup();
+    metrics_test!(test_token_metrics_default, |env| {
         let token = Address::generate(&env);
         let tm = get_token_metrics(&env, &token);
         assert_eq!(tm.total_locked, 0);
         assert_eq!(tm.total_paid_out, 0);
         assert_eq!(tm.total_refunded, 0);
-    }
+    });
 
-    #[test]
-    fn test_update_token_locked_positive() {
-        let env = setup();
+    metrics_test!(test_update_token_locked_positive, |env| {
         let token = Address::generate(&env);
         update_token_locked(&env, &token, 1000);
         let tm = get_token_metrics(&env, &token);
         assert_eq!(tm.total_locked, 1000);
         assert_eq!(tm.total_paid_out, 0);
-    }
+    });
 
-    #[test]
-    fn test_update_token_locked_negative() {
-        let env = setup();
+    metrics_test!(test_update_token_locked_negative, |env| {
         let token = Address::generate(&env);
         update_token_locked(&env, &token, 1000);
         update_token_locked(&env, &token, -400);
         let tm = get_token_metrics(&env, &token);
         assert_eq!(tm.total_locked, 600);
         assert_eq!(tm.total_paid_out, 400);
-    }
+    });
 
-    #[test]
-    fn test_record_token_refund() {
-        let env = setup();
+    metrics_test!(test_record_token_refund, |env| {
         let token = Address::generate(&env);
         update_token_locked(&env, &token, 1000);
         record_token_refund(&env, &token, 300);
         let tm = get_token_metrics(&env, &token);
         assert_eq!(tm.total_locked, 700);
         assert_eq!(tm.total_refunded, 300);
-    }
+    });
 
-    #[test]
-    fn test_reset_clears_all() {
-        let env = setup();
+    metrics_test!(test_reset_clears_all, |env| {
         let admin = Address::generate(&env);
         Storage::set_global_admin(&env, &admin);
 
@@ -356,15 +333,13 @@ mod tests {
         let m = get_metrics(&env);
         assert_eq!(m.total_grants_created, 0);
         assert_eq!(m.total_disputes_raised, 0);
-    }
+    });
 
-    #[test]
-    fn test_reset_unauthorized() {
-        let env = setup();
+    metrics_test!(test_reset_unauthorized, |env| {
         let admin = Address::generate(&env);
         Storage::set_global_admin(&env, &admin);
 
         let other = Address::generate(&env);
         assert!(reset(&env, &other).is_err());
-    }
+    });
 }

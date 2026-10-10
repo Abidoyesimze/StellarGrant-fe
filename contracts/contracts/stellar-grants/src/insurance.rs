@@ -363,10 +363,72 @@ mod tests {
             .address();
         let stellar_asset = StellarAssetClient::new(&env, &token_contract);
         stellar_asset.mint(&policyholder, &10_000_000);
-        Storage::set_global_admin(&env, &admin);
-        let grant = make_grant(&env, &policyholder, &token_contract, 1);
-        Storage::set_grant(&env, 1, &grant);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            Storage::set_global_admin(&env, &admin);
+            let grant = make_grant(&env, &policyholder, &token_contract, 1);
+            Storage::set_grant(&env, 1, &grant);
+        });
         (env, admin, policyholder, token_contract)
+    }
+
+    /// Mints `amount` into the contract and credits it to the insurance pool.
+    fn fund_pool(env: &Env, token: &Address, amount: i128) {
+        StellarAssetClient::new(env, token).mint(&crate::test_utils::contract_id(env), &amount);
+        crate::test_utils::in_contract(env, || Storage::set_insurance_pool(env, token, amount));
+    }
+
+    // Each call runs in its own contract frame, as a separate invocation would.
+
+    fn purchase_policy(
+        env: &Env,
+        policyholder: &Address,
+        grant_id: u64,
+        token: &Address,
+        coverage_amount: i128,
+    ) -> Result<InsurancePolicy, ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::purchase_policy(env, policyholder, grant_id, token, coverage_amount)
+        })
+    }
+
+    fn file_claim(
+        env: &Env,
+        claimant: &Address,
+        grant_id: u64,
+        claimed_amount: i128,
+        reason: String,
+    ) -> Result<u32, ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::file_claim(env, claimant, grant_id, claimed_amount, reason)
+        })
+    }
+
+    fn approve_claim(
+        env: &Env,
+        admin: &Address,
+        claim_id: u32,
+        payout_amount: i128,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::approve_claim(env, admin, claim_id, payout_amount)
+        })
+    }
+
+    fn deactivate_policy(env: &Env, admin: &Address, grant_id: u64) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || super::deactivate_policy(env, admin, grant_id))
+    }
+
+    fn pool_balance(env: &Env, token: &Address) -> i128 {
+        crate::test_utils::in_contract(env, || super::pool_balance(env, token))
+    }
+
+    fn get_policy(env: &Env, grant_id: u64) -> Option<InsurancePolicy> {
+        crate::test_utils::in_contract(env, || super::get_policy(env, grant_id))
+    }
+
+    fn get_claim(env: &Env, claim_id: u32) -> Result<InsuranceClaim, ContractError> {
+        crate::test_utils::in_contract(env, || super::get_claim(env, claim_id))
     }
 
     #[test]
@@ -396,9 +458,7 @@ mod tests {
         purchase_policy(&env, &policyholder, 1, &token, coverage).unwrap();
 
         // Mint extra into pool so pool isn't the bottleneck
-        let stellar_asset = StellarAssetClient::new(&env, &token);
-        stellar_asset.mint(&env.current_contract_address(), &2_000_000);
-        Storage::set_insurance_pool(&env, &token, 2_000_000);
+        fund_pool(&env, &token, 2_000_000);
 
         let reason = String::from_str(&env, "bug");
         let claim_id = file_claim(&env, &policyholder, 1, 2_000_000, reason).unwrap();
@@ -442,9 +502,7 @@ mod tests {
         purchase_policy(&env, &policyholder, 1, &token, coverage).unwrap();
 
         // Mint extra into pool so pool isn't the bottleneck
-        let stellar_asset = StellarAssetClient::new(&env, &token);
-        stellar_asset.mint(&env.current_contract_address(), &2_000_000);
-        Storage::set_insurance_pool(&env, &token, 2_000_000);
+        fund_pool(&env, &token, 2_000_000);
 
         // First claim for 600,000 (within coverage)
         let reason1 = String::from_str(&env, "first incident");

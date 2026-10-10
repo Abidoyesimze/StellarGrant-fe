@@ -172,9 +172,10 @@ mod test {
     fn test_submit_evidence_with_schema() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let owner = Address::generate(&env);
 
+        // Each owner-authorized call gets its own frame, as separate invocations.
         env.as_contract(&contract_id, || {
-            let owner = Address::generate(&env);
             setup_grant(&env, 1, &owner);
 
             let fields = vec![
@@ -191,7 +192,9 @@ mod test {
                 },
             ];
             set_schema(&env, &owner, 1, 0, fields).unwrap();
+        });
 
+        env.as_contract(&contract_id, || {
             // Missing required field
             let mut invalid_values = Map::new(&env);
             invalid_values.set(
@@ -200,7 +203,9 @@ mod test {
             );
             let result = submit_evidence(&env, &owner, 1, 0, invalid_values);
             assert_eq!(result, Err(ContractError::InvalidInput));
+        });
 
+        env.as_contract(&contract_id, || {
             // Valid submission
             let mut valid_values = Map::new(&env);
             valid_values.set(

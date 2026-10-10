@@ -168,10 +168,93 @@ mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env, String};
 
-    #[test]
-    fn submit_updates_aggregate_signals() {
+    fn make_grant(env: &Env, id: u64, total_milestones: u32) -> crate::types::Grant {
+        crate::types::Grant {
+            id,
+            owner: Address::generate(env),
+            title: String::from_str(env, "G"),
+            description: String::from_str(env, "D"),
+            token: Address::generate(env),
+            status: crate::types::GrantStatus::Active,
+            total_amount: 0,
+            milestone_amount: 0,
+            reviewers: Vec::new(env),
+            total_milestones,
+            milestones_paid_out: 0,
+            escrow_balance: 0,
+            funders: Vec::new(env),
+            reason: None,
+            timestamp: 0,
+            require_compliance: None,
+        }
+    }
+
+    /// Registers the contract and seeds grants 1 and 2, which the tests review.
+    fn setup() -> Env {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            for id in [1, 2] {
+                Storage::set_grant(&env, id, &make_grant(&env, id, 3));
+            }
+        });
+        env
+    }
+
+    // Each call runs in its own contract frame, as a separate invocation would.
+
+    fn submit_review(
+        env: &Env,
+        reviewer: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        signal: PublicReviewSignal,
+        comment: String,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::submit_review(env, reviewer, grant_id, milestone_idx, signal, comment)
+        })
+    }
+
+    fn mark_helpful(
+        env: &Env,
+        voter: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        reviewer: &Address,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::mark_helpful(env, voter, grant_id, milestone_idx, reviewer)
+        })
+    }
+
+    fn aggregate_signals(env: &Env, grant_id: u64, milestone_idx: u32) -> (u32, u32, u32) {
+        crate::test_utils::in_contract(env, || {
+            super::aggregate_signals(env, grant_id, milestone_idx)
+        })
+    }
+
+    fn get_review(
+        env: &Env,
+        reviewer: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Option<PublicReview> {
+        crate::test_utils::in_contract(env, || {
+            super::get_review(env, reviewer, grant_id, milestone_idx)
+        })
+    }
+
+    fn has_reviewed(env: &Env, reviewer: &Address, grant_id: u64, milestone_idx: u32) -> bool {
+        crate::test_utils::in_contract(env, || {
+            super::has_reviewed(env, reviewer, grant_id, milestone_idx)
+        })
+    }
+
+    #[test]
+    fn submit_updates_aggregate_signals() {
+        let env = setup();
 
         let reviewer = Address::generate(&env);
         let grant_id = 1u64;
@@ -195,8 +278,7 @@ mod tests {
 
     #[test]
     fn mark_helpful_increments_count() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
 
         let reviewer = Address::generate(&env);
         let voter = Address::generate(&env);
@@ -219,8 +301,7 @@ mod tests {
 
     #[test]
     fn has_reviewed_returns_true_after_submission() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
 
         let reviewer = Address::generate(&env);
         assert!(!has_reviewed(&env, &reviewer, 1, 0));
@@ -240,8 +321,7 @@ mod tests {
 
     #[test]
     fn three_reviews_aggregate_reflects_counts() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
 
         for signal in [
             PublicReviewSignal::Positive,
@@ -268,16 +348,11 @@ mod tests {
 
     #[test]
     fn comment_exceeding_max_length_rejected() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
 
         let reviewer = Address::generate(&env);
-        // Build a 501-char string
-        let mut s = soroban_sdk::String::from_str(&env, "");
-        for _ in 0..501 {
-            s = soroban_sdk::String::from_str(&env, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-            break; // 501 chars
-        }
+        // One character over the limit
+        let s = String::from_bytes(&env, &[b'a'; MAX_PUBLIC_REVIEW_COMMENT_LEN as usize + 1]);
 
         let result = submit_review(&env, &reviewer, 1, 0, PublicReviewSignal::Positive, s);
         assert_eq!(result, Err(ContractError::CommentTooLong));
@@ -285,8 +360,7 @@ mod tests {
 
     #[test]
     fn submit_review_rejects_when_cap_reached() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
 
         let grant_id = 1u64;
         let milestone_idx = 0u32;
@@ -334,8 +408,7 @@ mod tests {
 
     #[test]
     fn submit_review_rejects_nonexistent_grant() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
         let reviewer = Address::generate(&env);
         let result = submit_review(
             &env,
@@ -350,8 +423,7 @@ mod tests {
 
     #[test]
     fn submit_review_rejects_milestone_out_of_bounds() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let env = setup();
         let reviewer = Address::generate(&env);
 
         // create a grant with only 1 milestone
@@ -374,7 +446,7 @@ mod tests {
             timestamp: 0,
             require_compliance: None,
         };
-        Storage::set_grant(&env, 1234, &grant);
+        crate::test_utils::in_contract(&env, || Storage::set_grant(&env, 1234, &grant));
 
         let result = submit_review(
             &env,

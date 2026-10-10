@@ -257,43 +257,44 @@ mod tests {
         (env, admin)
     }
 
-    #[test]
-    fn test_export_grants_empty() {
-        let (env, _admin) = setup();
+    macro_rules! export_test {
+        ($name:ident, |$env:ident| $body:block) => {
+            #[test]
+            fn $name() {
+                let ($env, _) = setup();
+                let contract_id = $env.register(crate::StellarGrantsContract, ());
+                $env.as_contract(&contract_id, || $body);
+            }
+        };
+    }
+
+    export_test!(test_export_grants_empty, |env| {
         let result = export_grants(&env, 0, 10, None);
         assert_eq!(result.total, 0);
         assert!(!result.has_more);
         assert!(result.items.is_empty());
-    }
+    });
 
-    #[test]
-    fn test_last_global_update_default() {
-        let (env, _admin) = setup();
+    export_test!(test_last_global_update_default, |env| {
         assert_eq!(last_global_update(&env), 0);
-    }
+    });
 
-    #[test]
-    fn test_set_and_get_last_updated() {
-        let (env, _admin) = setup();
+    export_test!(test_set_and_get_last_updated, |env| {
         set_last_updated(&env, 1, 1000);
         assert_eq!(get_last_updated(&env, 1), 1000);
         assert_eq!(last_global_update(&env), 1000);
-    }
+    });
 
-    #[test]
-    fn test_export_milestones_empty_grant() {
-        let (env, _admin) = setup();
+    export_test!(test_export_milestones_empty_grant, |env| {
         let result = export_milestones(&env, 999);
         assert!(result.is_empty());
-    }
+    });
 
-    #[test]
-    fn test_state_fingerprint_is_stable() {
-        let (env, _admin) = setup();
+    export_test!(test_state_fingerprint_is_stable, |env| {
         let fp1 = state_fingerprint(&env);
         let fp2 = state_fingerprint(&env);
         assert_eq!(fp1, fp2);
-    }
+    });
 
     #[test]
     fn test_cap_limit() {
@@ -302,19 +303,15 @@ mod tests {
         assert_eq!(cap_limit(100), constants::MAX_EXPORT_PAGE_SIZE);
     }
 
-    #[test]
-    fn test_export_grants_overflow() {
-        let (env, _admin) = setup();
+    export_test!(test_export_grants_overflow, |env| {
         let result = export_grants(&env, u32::MAX - 5, 10, None);
         assert!(!result.has_more);
-    }
+    });
 
-    #[test]
-    fn test_export_milestones_since_overflow() {
-        let (env, _admin) = setup();
+    export_test!(test_export_milestones_since_overflow, |env| {
         let result = export_milestones_since(&env, 0, u32::MAX - 5, 10);
         assert!(!result.has_more);
-    }
+    });
 
     fn make_grant(env: &Env, owner: &Address) -> crate::types::Grant {
         crate::types::Grant {
@@ -342,9 +339,9 @@ mod tests {
     // failed to compile with E0308. Confirms the fixed scan loop still
     // bounds itself to `MAX_GRANTS_PER_SCAN` even when `GlobalOrder` holds
     // more ids than that (issue #855's cost-bounding behavior).
-    #[test]
-    fn test_export_grants_stops_at_max_grants_per_scan() {
-        let (env, _admin) = setup();
+    export_test!(test_export_grants_stops_at_max_grants_per_scan, |env| {
+        env.cost_estimate().disable_resource_limits();
+        env.cost_estimate().budget().reset_unlimited();
         let overflow_count = MAX_GRANTS_PER_SCAN + 5;
         let mut ids = soroban_sdk::Vec::new(&env);
         for i in 1..=overflow_count as u64 {
@@ -359,7 +356,7 @@ mod tests {
         // of how many more are queued in GlobalOrder.
         assert_eq!(result.total, MAX_GRANTS_PER_SCAN);
         assert!(result.has_more);
-    }
+    });
 
     #[test]
     fn test_export_grants_scans_from_offset_past_scan_limit() {
@@ -396,6 +393,10 @@ mod tests {
     #[test]
     fn test_export_milestones_since_stops_at_max_grants_per_scan() {
         let (env, owner) = setup();
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        env.as_contract(&contract_id, || {
+        env.cost_estimate().disable_resource_limits();
+        env.cost_estimate().budget().reset_unlimited();
         let overflow_count = MAX_GRANTS_PER_SCAN + 5;
         let mut ids = soroban_sdk::Vec::new(&env);
         for i in 1..=overflow_count as u64 {
@@ -434,6 +435,7 @@ mod tests {
 
         let result = export_milestones_since(&env, 0, 0, 50);
         assert_eq!(result.total, 1);
+        });
     }
 
     #[test]

@@ -251,6 +251,8 @@ mod tests {
     use super::*;
     use crate::storage::Storage;
     use crate::types::{Grant, GrantStatus, Milestone, MilestoneState};
+    extern crate alloc;
+    use alloc::format;
     use soroban_sdk::{
         testutils::Address as _, testutils::Events as _, testutils::Ledger as _, Env, Map, String,
         Vec,
@@ -262,6 +264,7 @@ mod tests {
         let owner = Address::generate(&env);
         let reviewer1 = Address::generate(&env);
         let reviewer2 = Address::generate(&env);
+        crate::test_utils::register_contract(&env);
         (env, owner, reviewer1, reviewer2)
     }
 
@@ -314,33 +317,37 @@ mod tests {
     #[test]
     fn test_request_extension() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        env.ledger().with_mut(|li| li.timestamp = 500);
+            env.ledger().with_mut(|li| li.timestamp = 500);
 
-        request_extension(
-            &env,
-            &owner,
-            1,
-            0,
-            2000,
-            String::from_str(&env, "Need more time"),
-        )
-        .unwrap();
+            request_extension(
+                &env,
+                &owner,
+                1,
+                0,
+                2000,
+                String::from_str(&env, "Need more time"),
+            )
+            .unwrap();
 
-        let req = get_request(&env, 1, 0).unwrap();
-        assert_eq!(req.status, ExtensionStatus::Pending);
-        assert_eq!(req.new_deadline, 2000);
-        assert_eq!(req.original_deadline, 1000);
+            let req = get_request(&env, 1, 0).unwrap();
+            assert_eq!(req.status, ExtensionStatus::Pending);
+            assert_eq!(req.new_deadline, 2000);
+            assert_eq!(req.original_deadline, 1000);
+        });
     }
 
     #[test]
     fn test_get_request_returns_none_when_no_request() {
         let (env, _, _, _) = setup();
-        assert!(get_request(&env, 999, 0).is_none());
+        crate::test_utils::in_contract(&env, || {
+            assert!(get_request(&env, 999, 0).is_none());
+        });
     }
 
     #[test]
@@ -392,55 +399,59 @@ mod tests {
     #[test]
     fn test_vote_extension_approve() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        env.ledger().with_mut(|li| li.timestamp = 500);
-        request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
+            env.ledger().with_mut(|li| li.timestamp = 500);
+            request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
 
-        // First approve vote (need majority = 2/2 + 1 = 2)
-        let event_count_before_vote = env.events().all().events().len();
-        let status = vote_extension(&env, &r1, 1, 0, true).unwrap();
-        assert_eq!(status, ExtensionStatus::Pending); // Not yet majority
-        let events_after_vote = env.events().all();
-        assert_eq!(
-            events_after_vote.events().len(),
-            event_count_before_vote + 1
-        );
-        assert!(events_after_vote
-            .events()
-            .iter()
-            .any(|event| format!("{event:?}").contains("extension_vote_cast")));
+            // First approve vote (need majority = 2/2 + 1 = 2)
+            let event_count_before_vote = env.events().all().events().len();
+            let status = vote_extension(&env, &r1, 1, 0, true).unwrap();
+            assert_eq!(status, ExtensionStatus::Pending); // Not yet majority
+            let events_after_vote = env.events().all();
+            assert_eq!(
+                events_after_vote.events().len(),
+                event_count_before_vote + 1
+            );
+            assert!(events_after_vote
+                .events()
+                .iter()
+                .any(|event| format!("{event:?}").contains("extension_vote_cast")));
 
-        // Second approve vote reaches majority
-        let status = vote_extension(&env, &r2, 1, 0, true).unwrap();
-        assert_eq!(status, ExtensionStatus::Approved);
+            // Second approve vote reaches majority
+            let status = vote_extension(&env, &r2, 1, 0, true).unwrap();
+            assert_eq!(status, ExtensionStatus::Approved);
 
-        // Verify deadline was updated
-        let milestone = Storage::get_milestone(&env, 1, 0).unwrap();
-        assert_eq!(milestone.deadline, Some(2000));
+            // Verify deadline was updated
+            let milestone = Storage::get_milestone(&env, 1, 0).unwrap();
+            assert_eq!(milestone.deadline, Some(2000));
+        });
     }
 
     #[test]
     fn test_vote_extension_deny() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        env.ledger().with_mut(|li| li.timestamp = 500);
-        request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
+            env.ledger().with_mut(|li| li.timestamp = 500);
+            request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
 
-        vote_extension(&env, &r1, 1, 0, false).unwrap();
-        let status = vote_extension(&env, &r2, 1, 0, false).unwrap();
-        assert_eq!(status, ExtensionStatus::Denied);
+            vote_extension(&env, &r1, 1, 0, false).unwrap();
+            let status = vote_extension(&env, &r2, 1, 0, false).unwrap();
+            assert_eq!(status, ExtensionStatus::Denied);
 
-        // Deadline should NOT change
-        let milestone = Storage::get_milestone(&env, 1, 0).unwrap();
-        assert_eq!(milestone.deadline, Some(1000));
+            // Deadline should NOT change
+            let milestone = Storage::get_milestone(&env, 1, 0).unwrap();
+            assert_eq!(milestone.deadline, Some(1000));
+        });
     }
 
     #[test]
@@ -478,18 +489,21 @@ mod tests {
     #[test]
     fn test_withdraw_request() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        env.ledger().with_mut(|li| li.timestamp = 500);
-        request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
+            env.ledger().with_mut(|li| li.timestamp = 500);
+            request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
+        });
+        crate::test_utils::in_contract(&env, || {
+            withdraw_request(&env, &owner, 1, 0).unwrap();
 
-        withdraw_request(&env, &owner, 1, 0).unwrap();
-
-        // Request should be removed
-        assert!(get_request(&env, 1, 0).is_none());
+            // Request should be removed
+            assert!(get_request(&env, 1, 0).is_none());
+        });
     }
 
     #[test]
@@ -511,37 +525,41 @@ mod tests {
     #[test]
     fn test_is_overdue() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        // Before deadline
-        env.ledger().with_mut(|li| li.timestamp = 500);
-        assert!(!is_overdue(&env, 1, 0));
+            // Before deadline
+            env.ledger().with_mut(|li| li.timestamp = 500);
+            assert!(!is_overdue(&env, 1, 0));
 
-        // After deadline
-        env.ledger().with_mut(|li| li.timestamp = 1001);
-        assert!(is_overdue(&env, 1, 0));
+            // After deadline
+            env.ledger().with_mut(|li| li.timestamp = 1001);
+            assert!(is_overdue(&env, 1, 0));
+        });
     }
 
     #[test]
     fn test_extension_history() {
         let (env, owner, r1, r2) = setup();
-        let mut reviewers = Vec::new(&env);
-        reviewers.push_back(r1.clone());
-        reviewers.push_back(r2.clone());
-        create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
+        crate::test_utils::in_contract(&env, || {
+            let mut reviewers = Vec::new(&env);
+            reviewers.push_back(r1.clone());
+            reviewers.push_back(r2.clone());
+            create_grant_with_milestone(&env, &owner, &reviewers, 1, 1000);
 
-        env.ledger().with_mut(|li| li.timestamp = 500);
-        request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
+            env.ledger().with_mut(|li| li.timestamp = 500);
+            request_extension(&env, &owner, 1, 0, 2000, String::from_str(&env, "reason")).unwrap();
 
-        // Approve it
-        vote_extension(&env, &r1, 1, 0, true).unwrap();
-        vote_extension(&env, &r2, 1, 0, true).unwrap();
+            // Approve it
+            vote_extension(&env, &r1, 1, 0, true).unwrap();
+            vote_extension(&env, &r2, 1, 0, true).unwrap();
 
-        let history = get_extension_history(&env, 1);
-        assert_eq!(history.len(), 1);
-        assert_eq!(history.get(0).unwrap().status, ExtensionStatus::Approved);
+            let history = get_extension_history(&env, 1);
+            assert_eq!(history.len(), 1);
+            assert_eq!(history.get(0).unwrap().status, ExtensionStatus::Approved);
+        });
     }
 }

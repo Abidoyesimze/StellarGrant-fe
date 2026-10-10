@@ -187,90 +187,105 @@ mod tests {
     fn test_is_price_fresh_within_threshold() {
         let env = Env::default();
         env.mock_all_auths();
-        let (_, base_token, _) = setup_oracle(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let (_, base_token, _) = setup_oracle(&env);
 
-        env.ledger().set_timestamp(1_000);
-        let quote = PriceQuote {
-            token: base_token,
-            price_in_base: PRICE_SCALE,
-            fetched_at: 800,
-            is_stale: false,
-        };
-        assert!(is_price_fresh(&env, &quote));
+            env.ledger().set_timestamp(1_000);
+            let quote = PriceQuote {
+                token: base_token,
+                price_in_base: PRICE_SCALE,
+                fetched_at: 800,
+                is_stale: false,
+            };
+            assert!(is_price_fresh(&env, &quote));
+        });
     }
 
     #[test]
     fn test_is_price_fresh_outside_threshold() {
         let env = Env::default();
         env.mock_all_auths();
-        let (_, base_token, _) = setup_oracle(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let (_, base_token, _) = setup_oracle(&env);
 
-        env.ledger().set_timestamp(5_000);
-        let quote = PriceQuote {
-            token: base_token,
-            price_in_base: PRICE_SCALE,
-            fetched_at: 1_000,
-            is_stale: true,
-        };
-        assert!(!is_price_fresh(&env, &quote));
+            env.ledger().set_timestamp(5_000);
+            let quote = PriceQuote {
+                token: base_token,
+                price_in_base: PRICE_SCALE,
+                fetched_at: 1_000,
+                is_stale: true,
+            };
+            assert!(!is_price_fresh(&env, &quote));
+        });
     }
 
     #[test]
     fn test_is_price_fresh_rejects_future_fetched_at() {
         let env = Env::default();
         env.mock_all_auths();
-        let (_, base_token, _) = setup_oracle(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let (_, base_token, _) = setup_oracle(&env);
 
-        env.ledger().set_timestamp(1_000);
-        let quote = PriceQuote {
-            token: base_token,
-            price_in_base: PRICE_SCALE,
-            fetched_at: 1_500, // in the future relative to `now`
-            is_stale: false,
-        };
-        assert!(!is_price_fresh(&env, &quote));
+            env.ledger().set_timestamp(1_000);
+            let quote = PriceQuote {
+                token: base_token,
+                price_in_base: PRICE_SCALE,
+                fetched_at: 1_500, // in the future relative to `now`
+                is_stale: false,
+            };
+            assert!(!is_price_fresh(&env, &quote));
+        });
     }
 
     #[test]
     fn test_stale_price_returns_err_from_get_price() {
         let env = Env::default();
         env.mock_all_auths();
-        let (oracle_addr, base_token, _) = setup_oracle(&env);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let (oracle_addr, base_token, _) = setup_oracle(&env);
 
-        let oracle_client = MockOracleClient::new(&env, &oracle_addr);
-        oracle_client.set_price(&base_token, &PRICE_SCALE, &100);
+            let oracle_client = MockOracleClient::new(&env, &oracle_addr);
+            oracle_client.set_price(&base_token, &PRICE_SCALE, &100);
 
-        env.ledger().set_timestamp(10_000);
-        assert_eq!(
-            get_price(&env, &base_token),
-            Err(ContractError::InvalidInput)
-        );
+            env.ledger().set_timestamp(10_000);
+            assert_eq!(
+                get_price(&env, &base_token),
+                Err(ContractError::InvalidInput)
+            );
+        });
     }
 
     #[test]
     fn test_convert_amount_xlm_usdc_roundtrip() {
         let env = Env::default();
         env.mock_all_auths();
-        let (oracle_addr, usdc_token, xlm_token) = setup_oracle(&env);
-        let oracle_client = MockOracleClient::new(&env, &oracle_addr);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let (oracle_addr, usdc_token, xlm_token) = setup_oracle(&env);
+            let oracle_client = MockOracleClient::new(&env, &oracle_addr);
 
-        let now = 2_000u64;
-        env.ledger().set_timestamp(now);
+            let now = 2_000u64;
+            env.ledger().set_timestamp(now);
 
-        // 1 XLM = 1.2 USDC (7-decimal fixed point)
-        let xlm_price = 12_000_000i128;
-        // 1 USDC = 1 USDC in base terms
-        let usdc_price = PRICE_SCALE;
+            // 1 XLM = 1.2 USDC (7-decimal fixed point)
+            let xlm_price = 12_000_000i128;
+            // 1 USDC = 1 USDC in base terms
+            let usdc_price = PRICE_SCALE;
 
-        oracle_client.set_price(&xlm_token, &xlm_price, &now);
-        oracle_client.set_price(&usdc_token, &usdc_price, &now);
+            oracle_client.set_price(&xlm_token, &xlm_price, &now);
+            oracle_client.set_price(&usdc_token, &usdc_price, &now);
 
-        let xlm_amount = 100_000_000i128; // 10 XLM
-        let usdc_amount = convert_amount(&env, xlm_amount, &xlm_token, &usdc_token).unwrap();
-        assert_eq!(usdc_amount, 120_000_000); // 12 USDC
+            let xlm_amount = 100_000_000i128; // 10 XLM
+            let usdc_amount = convert_amount(&env, xlm_amount, &xlm_token, &usdc_token).unwrap();
+            assert_eq!(usdc_amount, 120_000_000); // 12 USDC
 
-        let xlm_back = convert_amount(&env, usdc_amount, &usdc_token, &xlm_token).unwrap();
-        assert_eq!(xlm_back, xlm_amount);
+            let xlm_back = convert_amount(&env, usdc_amount, &usdc_token, &xlm_token).unwrap();
+            assert_eq!(xlm_back, xlm_amount);
+        });
     }
 
     // A deliberately broken oracle contract whose `price` method panics.
@@ -295,36 +310,38 @@ mod tests {
     fn test_panicking_oracle_returns_clean_err() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+            let panicking_id = env.register(PanickingOracle, ());
+            let base_token = Address::generate(&env);
 
-        let panicking_id = env.register(PanickingOracle, ());
-        let base_token = Address::generate(&env);
+            set_oracle(
+                &env,
+                &admin,
+                OracleConfig {
+                    oracle_address: panicking_id,
+                    base_token: base_token.clone(),
+                    staleness_threshold: 3_600,
+                },
+            )
+            .unwrap();
 
-        set_oracle(
-            &env,
-            &admin,
-            OracleConfig {
-                oracle_address: panicking_id,
-                base_token: base_token.clone(),
-                staleness_threshold: 3_600,
-            },
-        )
-        .unwrap();
-
-        // Under the pre-#692 implementation, `env.invoke_contract` would
-        // panic and abort the whole transaction. With the safe-call fix
-        // routed through `cross_contract::read_oracle_price`, the panic is
-        // converted into `Err(ContractError::InvalidInput)`.
-        assert_eq!(
-            get_price(&env, &base_token),
-            Err(ContractError::InvalidInput)
-        );
-        assert_eq!(
-            convert_amount(&env, 100, &base_token, &Address::generate(&env)),
-            Err(ContractError::InvalidInput)
-        );
+            // Under the pre-#692 implementation, `env.invoke_contract` would
+            // panic and abort the whole transaction. With the safe-call fix
+            // routed through `cross_contract::read_oracle_price`, the panic is
+            // converted into `Err(ContractError::InvalidInput)`.
+            assert_eq!(
+                get_price(&env, &base_token),
+                Err(ContractError::InvalidInput)
+            );
+            assert_eq!(
+                convert_amount(&env, 100, &base_token, &Address::generate(&env)),
+                Err(ContractError::InvalidInput)
+            );
+        });
     }
 
     /// #693: tripping the Oracle circuit breaker must block both
@@ -339,9 +356,14 @@ mod tests {
     fn test_oracle_breaker_blocks_then_unblocks() {
         let env = Env::default();
         env.mock_all_auths();
-        let (oracle_addr, base_token, xlm_token) = setup_oracle(&env);
+        crate::test_utils::register_contract(&env);
+        // Admin-authorized calls each get their own frame, as separate
+        // invocations would.
+        let (oracle_addr, base_token, xlm_token) =
+            crate::test_utils::in_contract(&env, || setup_oracle(&env));
         let oracle_client = MockOracleClient::new(&env, &oracle_addr);
-        let admin = Storage::get_global_admin(&env).unwrap();
+        let admin =
+            crate::test_utils::in_contract(&env, || Storage::get_global_admin(&env).unwrap());
 
         let now = 2_000u64;
         env.ledger().set_timestamp(now);
@@ -351,11 +373,13 @@ mod tests {
         oracle_client.set_price(&base_token, &PRICE_SCALE, &now);
 
         // Sanity: reads succeed while the breaker is open.
-        assert!(get_price(&env, &xlm_token).is_ok());
-        assert!(convert_amount(&env, 10_000_000, &xlm_token, &base_token).is_ok());
+        crate::test_utils::in_contract(&env, || {
+            assert!(get_price(&env, &xlm_token).is_ok());
+            assert!(convert_amount(&env, 10_000_000, &xlm_token, &base_token).is_ok());
+        });
 
         // Trip the Oracle breaker.
-        env.as_contract(&oracle_addr, || {
+        crate::test_utils::in_contract(&env, || {
             crate::circuit_breaker::trip(
                 &env,
                 &admin,
@@ -367,22 +391,26 @@ mod tests {
         });
 
         // Both reads must now return ModuleTripped.
-        assert_eq!(
-            get_price(&env, &xlm_token),
-            Err(ContractError::ModuleTripped)
-        );
-        assert_eq!(
-            convert_amount(&env, 10_000_000, &xlm_token, &base_token),
-            Err(ContractError::ModuleTripped)
-        );
+        crate::test_utils::in_contract(&env, || {
+            assert_eq!(
+                get_price(&env, &xlm_token),
+                Err(ContractError::ModuleTripped)
+            );
+            assert_eq!(
+                convert_amount(&env, 10_000_000, &xlm_token, &base_token),
+                Err(ContractError::ModuleTripped)
+            );
+        });
 
         // Reset the Oracle breaker.
-        env.as_contract(&oracle_addr, || {
+        crate::test_utils::in_contract(&env, || {
             crate::circuit_breaker::reset(&env, &admin, ProtocolModule::Oracle).unwrap();
         });
 
         // Both reads must work again post-reset.
-        assert!(get_price(&env, &xlm_token).is_ok());
-        assert!(convert_amount(&env, 10_000_000, &xlm_token, &base_token).is_ok());
+        crate::test_utils::in_contract(&env, || {
+            assert!(get_price(&env, &xlm_token).is_ok());
+            assert!(convert_amount(&env, 10_000_000, &xlm_token, &base_token).is_ok());
+        });
     }
 }

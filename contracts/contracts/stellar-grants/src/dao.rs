@@ -41,7 +41,8 @@ pub fn set_quorum_votes(env: &Env, admin: &Address, quorum: u64) -> Result<(), C
 }
 
 /// Submit a new governance proposal. Any registered contributor/reviewer
-/// (anyone holding non-zero reputation) may propose.
+/// (anyone holding non-zero reputation) may propose. The caller must have
+/// already authorized `proposer`.
 pub fn create_proposal(
     env: &Env,
     proposer: &Address,
@@ -49,7 +50,6 @@ pub fn create_proposal(
     description: String,
     proposal_type: DaoProposalType,
 ) -> Result<u64, ContractError> {
-    proposer.require_auth();
     if Storage::get_reviewer_reputation(env, proposer.clone()) == 0 {
         return Err(ContractError::Unauthorized);
     }
@@ -464,24 +464,39 @@ mod tests {
         });
     }
 
+    // Auths are NOT mocked in the next three tests: they verify
+    // require_global_admin enforces a genuine `require_auth()` on the caller,
+    // rather than only comparing addresses (which anyone could pass since the
+    // admin's address is public). Without any authorization recorded for
+    // `admin`, the call must trap even though the address itself matches.
+
     #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
     fn test_set_dao_mode_rejects_admin_address_without_real_auth() {
         let env = Env::default();
-        // Do NOT mock auths: this verifies require_global_admin enforces a
-        // genuine `require_auth()` on the caller, rather than only comparing
-        // addresses (which anyone could pass since the admin's address is
-        // public). Without any authorization recorded for `admin`, the call
-        // must be rejected even though the address itself matches.
         with_contract(&env, || {
             let admin = setup(&env);
-            let result = set_dao_mode(&env, &admin, true);
-            assert!(result.is_err());
+            let _ = set_dao_mode(&env, &admin, true);
+        });
+    }
 
-            let result = set_voting_period(&env, &admin, 100);
-            assert!(result.is_err());
+    #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
+    fn test_set_voting_period_rejects_admin_address_without_real_auth() {
+        let env = Env::default();
+        with_contract(&env, || {
+            let admin = setup(&env);
+            let _ = set_voting_period(&env, &admin, 100);
+        });
+    }
 
-            let result = set_quorum_votes(&env, &admin, 5);
-            assert!(result.is_err());
+    #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
+    fn test_set_quorum_votes_rejects_admin_address_without_real_auth() {
+        let env = Env::default();
+        with_contract(&env, || {
+            let admin = setup(&env);
+            let _ = set_quorum_votes(&env, &admin, 5);
         });
     }
 
@@ -529,7 +544,7 @@ mod tests {
         let proposer = Address::generate(&env);
         let mut new_config = crate::config::default_config();
         new_config.protocol_fee_bps = 250;
-        new_config.max_reviewers = 15;
+        new_config.max_reviewers = 8;
 
         let id = client.dao_create_proposal(
             &proposer,
@@ -551,7 +566,7 @@ mod tests {
 
         let stored_config = client.get_protocol_config();
         assert_eq!(stored_config.protocol_fee_bps, 250);
-        assert_eq!(stored_config.max_reviewers, 15);
+        assert_eq!(stored_config.max_reviewers, 8);
 
         let proposal = client.get_dao_proposal(&id).unwrap();
         assert_eq!(proposal.status, DaoProposalStatus::Executed);

@@ -365,6 +365,8 @@ mod tests {
         });
 
         with_contract_id(&env, &contract_id, || {
+            env.cost_estimate().disable_resource_limits();
+            env.cost_estimate().budget().reset_unlimited();
             for _ in 0..crate::constants::MAX_BOUNTY_SUBMISSIONS {
                 let submitter = Address::generate(&env);
                 submit_solution(&env, id, &submitter, String::from_str(&env, "proof")).unwrap();

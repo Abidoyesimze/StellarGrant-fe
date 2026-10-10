@@ -107,6 +107,8 @@ mod streaming;
 mod syndication;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_utils;
 mod token_swap;
 mod treasury;
 mod types;
@@ -278,52 +280,7 @@ impl StellarGrantsContract {
         github_url: String,
     ) -> Result<(), ContractError> {
         contributor.require_auth();
-        rate_limit::check_and_increment(&env, &contributor, RateLimitAction::ContributorRegister)?;
-
-        if name.is_empty() || name.len() > constants::MAX_TITLE_LEN {
-            return Err(ContractError::InvalidInput);
-        }
-        if bio.len() > constants::MAX_BIO_LEN {
-            return Err(ContractError::InvalidInput);
-        }
-
-        // Issue #816: enforce the GlobalContributor whitelist gate. Defaults
-        // to Open mode, so this is a no-op unless an admin restricts it.
-        if !whitelist::is_allowed(&env, &contributor, &WhitelistScope::GlobalContributor) {
-            return Err(ContractError::AddressNotWhitelisted);
-        }
-
-        if Storage::get_contributor(&env, contributor.clone()).is_some() {
-            return Err(ContractError::AlreadyRegistered);
-        }
-
-        let profile = crate::types::ContributorProfile {
-            contributor: contributor.clone(),
-            name: name.clone(),
-            bio,
-            skills,
-            github_url,
-            registration_timestamp: env.ledger().timestamp(),
-            reputation_score: 0,
-            grants_count: 0,
-            total_earned: 0,
-            milestones_completed: 0,
-            milestones_rejected: 0,
-            last_action_at: env.ledger().timestamp(),
-        };
-
-        Storage::set_contributor(&env, contributor.clone(), &profile);
-
-        // Register in global index and emit contributor_registered event
-        registry::register_contributor(&env, &contributor, &name)?;
-
-        metrics::increment(&env, MetricField::ContributorsRegistered, 1);
-        if hooks::has_hooks(&env, HookEvent::ContributorRegistered) {
-            let payload = soroban_sdk::Bytes::new(&env);
-            hooks::trigger(&env, HookEvent::ContributorRegistered, payload);
-        }
-
-        Ok(())
+        internal_contributor_register(&env, &contributor, name, bio, skills, github_url)
     }
 
     /// Cancel a grant and refund remaining balance to funders
@@ -369,9 +326,8 @@ impl StellarGrantsContract {
             // Issue #564: forfeit collateral on grant abandonment.
             if let Some(req) = collateral::get_requirement(&env, grant_id) {
                 let forfeit_reason = String::from_str(&env, "grant cancelled by owner");
-                let _ = collateral::forfeit(
+                let _ = collateral::forfeit_authorized(
                     &env,
-                    &caller,
                     grant_id,
                     &grant.owner,
                     req.forfeit_on_abandon_bps,
@@ -1866,6 +1822,13 @@ impl StellarGrantsContract {
         // Issue #726: capture a tamper-evident state snapshot when a dispute is raised.
         snapshot::capture(&env, grant_id, SnapshotTrigger::DisputeRaised, &caller)?;
         metrics::increment(&env, MetricField::DisputesRaised, 1);
+        // Issue #699: notify subscribers watching this grant.
+        notification::emit_notification(
+            &env,
+            NotificationEvent::DisputeRaised,
+            &SubscriptionScope::PerGrant(grant_id),
+            ((grant_id as u128) << 32) | milestone_idx as u128,
+        );
         if hooks::has_hooks(&env, HookEvent::DisputeRaised) {
             let mut payload_data = [0u8; 12];
             payload_data[..8].copy_from_slice(&grant_id.to_le_bytes());
@@ -1925,9 +1888,8 @@ impl StellarGrantsContract {
         if outcome == DisputeStatus::ResolvedForFunder {
             if let Some(req) = collateral::get_requirement(&env, grant_id) {
                 let reason = String::from_str(&env, "dispute lost");
-                let _ = collateral::forfeit(
+                let _ = collateral::forfeit_authorized(
                     &env,
-                    &caller,
                     grant_id,
                     &grant.owner,
                     req.forfeit_on_dispute_loss_bps,
@@ -5117,6 +5079,64 @@ fn apply_milestone_submission(
         Some(grant.token.clone()),
         soroban_sdk::Vec::new(env),
     );
+
+    Ok(())
+}
+
+/// Contributor registration logic, shared by `contributor_register` and the
+/// relay dispatch. The caller must have already authorized `contributor`.
+pub(crate) fn internal_contributor_register(
+    env: &Env,
+    contributor: &Address,
+    name: String,
+    bio: String,
+    skills: soroban_sdk::Vec<String>,
+    github_url: String,
+) -> Result<(), ContractError> {
+    rate_limit::check_and_increment(env, contributor, RateLimitAction::ContributorRegister)?;
+
+    if name.is_empty() || name.len() > constants::MAX_TITLE_LEN {
+        return Err(ContractError::InvalidInput);
+    }
+    if bio.len() > constants::MAX_BIO_LEN {
+        return Err(ContractError::InvalidInput);
+    }
+
+    // Issue #816: enforce the GlobalContributor whitelist gate. Defaults
+    // to Open mode, so this is a no-op unless an admin restricts it.
+    if !whitelist::is_allowed(env, contributor, &WhitelistScope::GlobalContributor) {
+        return Err(ContractError::AddressNotWhitelisted);
+    }
+
+    if Storage::get_contributor(env, contributor.clone()).is_some() {
+        return Err(ContractError::AlreadyRegistered);
+    }
+
+    let profile = crate::types::ContributorProfile {
+        contributor: contributor.clone(),
+        name: name.clone(),
+        bio,
+        skills,
+        github_url,
+        registration_timestamp: env.ledger().timestamp(),
+        reputation_score: 0,
+        grants_count: 0,
+        total_earned: 0,
+        milestones_completed: 0,
+        milestones_rejected: 0,
+        last_action_at: env.ledger().timestamp(),
+    };
+
+    Storage::set_contributor(env, contributor.clone(), &profile);
+
+    // Register in global index and emit contributor_registered event
+    registry::register_contributor(env, contributor, &name)?;
+
+    metrics::increment(env, MetricField::ContributorsRegistered, 1);
+    if hooks::has_hooks(env, HookEvent::ContributorRegistered) {
+        let payload = soroban_sdk::Bytes::new(env);
+        hooks::trigger(env, HookEvent::ContributorRegistered, payload);
+    }
 
     Ok(())
 }

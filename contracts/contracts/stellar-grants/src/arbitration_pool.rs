@@ -668,9 +668,11 @@ mod tests {
 
         env.as_contract(&cid, || {
             cast_arbiter_vote(&env, &voter, case_id, true, 50).unwrap();
-            let res = cast_arbiter_vote(&env, &voter, case_id, false, 50);
-            assert_eq!(res, Err(ContractError::AlreadyVoted));
         });
+        let res = env.as_contract(&cid, || {
+            cast_arbiter_vote(&env, &voter, case_id, false, 50)
+        });
+        assert_eq!(res, Err(ContractError::AlreadyVoted));
     }
 
     #[test]
@@ -678,12 +680,13 @@ mod tests {
         let (env, cid, _token, _arbs, case_id) = setup_case_with_panel();
         let panel = get_panel(&env, &cid, case_id);
 
-        env.as_contract(&cid, || {
-            let res = cast_arbiter_vote(&env, &panel.get(0).unwrap(), case_id, true, 0);
-            assert_eq!(res, Err(ContractError::InvalidInput));
-            let res = cast_arbiter_vote(&env, &panel.get(0).unwrap(), case_id, true, 101);
-            assert_eq!(res, Err(ContractError::InvalidInput));
-        });
+        let voter = panel.get(0).unwrap();
+        let low_confidence =
+            env.as_contract(&cid, || cast_arbiter_vote(&env, &voter, case_id, true, 0));
+        assert_eq!(low_confidence, Err(ContractError::InvalidInput));
+        let high_confidence =
+            env.as_contract(&cid, || cast_arbiter_vote(&env, &voter, case_id, true, 101));
+        assert_eq!(high_confidence, Err(ContractError::InvalidInput));
     }
 
     #[test]

@@ -319,6 +319,9 @@ mod tests {
     #[test]
     fn test_funder_with_more_than_50_grants_gets_complete_report() {
         let env = Env::default();
+        // This checks the report isn't truncated, not that it fits in one
+        // invocation: 55 grants exceed mainnet's per-invocation footprint.
+        env.cost_estimate().disable_resource_limits();
         let contract_id = setup(&env);
 
         env.as_contract(&contract_id, || {

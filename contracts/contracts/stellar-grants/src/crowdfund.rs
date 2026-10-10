@@ -281,131 +281,161 @@ mod tests {
     fn test_pledge_to_unknown_campaign_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let backer = Address::generate(&env);
-        let result = pledge(&env, 999, &backer, 100);
-        assert_eq!(result, Err(ContractError::CrowdfundNotFound));
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let backer = Address::generate(&env);
+            let result = pledge(&env, 999, &backer, 100);
+            assert_eq!(result, Err(ContractError::CrowdfundNotFound));
+        });
     }
 
     #[test]
     fn test_pledge_after_deadline_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let backer = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let backer = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        env.ledger().with_mut(|l| l.timestamp += 2_000);
-        let result = pledge(&env, id, &backer, 100);
-        assert_eq!(result, Err(ContractError::DeadlinePassed));
+            env.ledger().with_mut(|l| l.timestamp += 2_000);
+            let result = pledge(&env, id, &backer, 100);
+            assert_eq!(result, Err(ContractError::DeadlinePassed));
+        });
     }
 
     #[test]
     fn test_finalize_before_deadline_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        let result = finalize(&env, id);
-        assert_eq!(result, Err(ContractError::CrowdfundDeadlineNotReached));
+            let result = finalize(&env, id);
+            assert_eq!(result, Err(ContractError::CrowdfundDeadlineNotReached));
+        });
     }
 
     #[test]
     fn test_finalize_underfunded_marks_failed() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        env.ledger().with_mut(|l| l.timestamp += 2_000);
-        let status = finalize(&env, id).unwrap();
-        assert_eq!(status, CrowdfundStatus::Failed);
-        let campaign = get_campaign(&env, id).unwrap();
-        assert_eq!(campaign.status, CrowdfundStatus::Failed);
+            env.ledger().with_mut(|l| l.timestamp += 2_000);
+            let status = finalize(&env, id).unwrap();
+            assert_eq!(status, CrowdfundStatus::Failed);
+            let campaign = get_campaign(&env, id).unwrap();
+            assert_eq!(campaign.status, CrowdfundStatus::Failed);
+        });
     }
 
     #[test]
     fn test_double_finalize_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        env.ledger().with_mut(|l| l.timestamp += 2_000);
-        finalize(&env, id).unwrap();
-        let result = finalize(&env, id);
-        assert_eq!(result, Err(ContractError::CrowdfundAlreadyFinalized));
+            env.ledger().with_mut(|l| l.timestamp += 2_000);
+            finalize(&env, id).unwrap();
+            let result = finalize(&env, id);
+            assert_eq!(result, Err(ContractError::CrowdfundAlreadyFinalized));
+        });
     }
 
     #[test]
     fn test_claim_refund_on_active_campaign_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let backer = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let backer = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        let result = claim_refund(&env, id, &backer);
-        assert_eq!(result, Err(ContractError::CrowdfundNotActive));
+            let result = claim_refund(&env, id, &backer);
+            assert_eq!(result, Err(ContractError::CrowdfundNotActive));
+        });
     }
 
     #[test]
     fn test_claim_refund_with_no_pledge_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let backer = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let backer = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        env.ledger().with_mut(|l| l.timestamp += 2_000);
-        finalize(&env, id).unwrap();
+            env.ledger().with_mut(|l| l.timestamp += 2_000);
+            finalize(&env, id).unwrap();
 
-        let result = claim_refund(&env, id, &backer);
-        assert_eq!(result, Err(ContractError::NoRefundableAmount));
+            let result = claim_refund(&env, id, &backer);
+            assert_eq!(result, Err(ContractError::NoRefundableAmount));
+        });
     }
 
     #[test]
     fn test_cancel_by_non_owner_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let stranger = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let stranger = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        let result = cancel(&env, id, &stranger);
-        assert_eq!(result, Err(ContractError::Unauthorized));
+            let result = cancel(&env, id, &stranger);
+            assert_eq!(result, Err(ContractError::Unauthorized));
+        });
     }
 
     #[test]
     fn test_cancel_marks_status() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        cancel(&env, id, &owner).unwrap();
-        let campaign = get_campaign(&env, id).unwrap();
-        assert_eq!(campaign.status, CrowdfundStatus::Cancelled);
+            cancel(&env, id, &owner).unwrap();
+            let campaign = get_campaign(&env, id).unwrap();
+            assert_eq!(campaign.status, CrowdfundStatus::Cancelled);
+        });
     }
 
     #[test]
     fn test_list_backers_empty_initially() {
         let env = Env::default();
         env.mock_all_auths();
-        let owner = Address::generate(&env);
-        let token = Address::generate(&env);
-        let id = make_campaign(&env, &owner, &token);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let owner = Address::generate(&env);
+            let token = Address::generate(&env);
+            let id = make_campaign(&env, &owner, &token);
 
-        let backers = list_backers(&env, id);
-        assert_eq!(backers.len(), 0);
+            let backers = list_backers(&env, id);
+            assert_eq!(backers.len(), 0);
+        });
     }
 
     // ── emergency pause / circuit breaker integration ───────────────────────

@@ -6,6 +6,30 @@ use stellar_grants::{MilestoneState, StellarGrantsContractClient};
 
 const COMMUNITY_REVIEW_PERIOD: u64 = 3 * 24 * 60 * 60;
 
+/// Approve votes require the milestone's required criteria to be met, so
+/// define one criterion, submit evidence for it, and have `reviewer` approve.
+fn satisfy_checklist(
+    env: &Env,
+    client: &StellarGrantsContractClient,
+    owner: &Address,
+    reviewer: &Address,
+    grant_id: u64,
+    milestone_idx: u32,
+) {
+    let criteria = Vec::from_array(
+        env,
+        [stellar_grants::AcceptanceCriteria {
+            idx: 0,
+            description: String::from_str(env, "c"),
+            is_required: true,
+        }],
+    );
+    client.checklist_define_criteria(owner, &grant_id, &milestone_idx, &criteria);
+    let evidence = Vec::from_array(env, [Some(String::from_str(env, "https://evidence.com"))]);
+    client.checklist_submit(owner, &grant_id, &milestone_idx, &evidence);
+    client.checklist_review_criterion(reviewer, &grant_id, &milestone_idx, &0u32, &true);
+}
+
 #[test]
 fn test_milestone_voting_quorum_and_events() {
     let env = Env::default();
@@ -47,6 +71,7 @@ fn test_milestone_voting_quorum_and_events() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
+    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
 
     let res1 = client.milestone_vote(&grant_id, &0, &reviewers.get(0).unwrap(), &true, &None);
     assert!(!res1); // Quorum not reached yet (1/2)
@@ -99,6 +124,7 @@ fn test_milestone_vote_after_quorum_panics() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
+    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
     let ts = env.ledger().timestamp();
     env.ledger()
         .set_timestamp(ts.saturating_add(COMMUNITY_REVIEW_PERIOD).saturating_add(1));
@@ -146,6 +172,7 @@ fn test_milestone_double_voting_panics() {
         &String::from_str(&env, "desc"),
         &String::from_str(&env, "proof"),
     );
+    satisfy_checklist(&env, &client, &owner, &reviewers.get(0).unwrap(), grant_id, 0);
 
     let ts = env.ledger().timestamp();
     env.ledger()

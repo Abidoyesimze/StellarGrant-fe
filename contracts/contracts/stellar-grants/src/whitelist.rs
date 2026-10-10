@@ -213,49 +213,48 @@ mod tests {
     fn test_restricted_mode_blocks_non_member() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let member = Address::generate(&env);
+        let non_member = Address::generate(&env);
+        let scope = WhitelistScope::GlobalContributor;
 
         env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
-            let member = Address::generate(&env);
-            let non_member = Address::generate(&env);
-            let scope = WhitelistScope::GlobalContributor;
-
             Storage::set_global_admin(&env, &admin);
-
-            // Set Restricted mode.
             set_mode(&env, &admin, &scope, WhitelistMode::Restricted).unwrap();
-            assert_eq!(get_mode(&env, &scope), WhitelistMode::Restricted);
-
-            // Non-member should be blocked.
-            assert!(!is_allowed(&env, &non_member, &scope));
-
-            // Add member.
-            add(&env, &admin, &member, &scope).unwrap();
-            assert!(is_allowed(&env, &member, &scope));
         });
+        assert_eq!(
+            env.as_contract(&contract_id, || get_mode(&env, &scope)),
+            WhitelistMode::Restricted
+        );
+
+        assert!(!env.as_contract(&contract_id, || is_allowed(&env, &non_member, &scope)));
+
+        env.as_contract(&contract_id, || {
+            add(&env, &admin, &member, &scope).unwrap();
+        });
+        assert!(env.as_contract(&contract_id, || is_allowed(&env, &member, &scope)));
     }
 
     #[test]
     fn test_add_remove_roundtrip() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let addr = Address::generate(&env);
+        let scope = WhitelistScope::GlobalReviewer;
 
         env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
-            let addr = Address::generate(&env);
-            let scope = WhitelistScope::GlobalReviewer;
-
             Storage::set_global_admin(&env, &admin);
             set_mode(&env, &admin, &scope, WhitelistMode::Restricted).unwrap();
-
-            // Add.
-            add(&env, &admin, &addr, &scope).unwrap();
-            assert!(is_allowed(&env, &addr, &scope));
-
-            // Remove.
-            remove(&env, &admin, &addr, &scope).unwrap();
-            assert!(!is_allowed(&env, &addr, &scope));
         });
+        env.as_contract(&contract_id, || {
+            add(&env, &admin, &addr, &scope).unwrap();
+        });
+        assert!(env.as_contract(&contract_id, || is_allowed(&env, &addr, &scope)));
+        env.as_contract(&contract_id, || {
+            remove(&env, &admin, &addr, &scope).unwrap();
+        });
+        assert!(!env.as_contract(&contract_id, || is_allowed(&env, &addr, &scope)));
     }
 
     #[test]
@@ -325,27 +324,26 @@ mod tests {
     fn test_whitelist_entry_cap_enforced() {
         let env = Env::default();
         let contract_id = setup(&env);
+        let admin = Address::generate(&env);
+        let scope = WhitelistScope::GlobalReviewer;
 
         env.as_contract(&contract_id, || {
-            let admin = Address::generate(&env);
-            let scope = WhitelistScope::GlobalReviewer;
-
             Storage::set_global_admin(&env, &admin);
             set_mode(&env, &admin, &scope, WhitelistMode::Restricted).unwrap();
-
-            // Add entries up to the cap.
-            for _ in 0..MAX_WHITELIST_ENTRIES_PER_SCOPE {
-                let addr = Address::generate(&env);
-                add(&env, &admin, &addr, &scope).unwrap();
-            }
-
-            // Adding one more should fail.
-            let extra_addr = Address::generate(&env);
-            assert_eq!(
-                add(&env, &admin, &extra_addr, &scope),
-                Err(ContractError::InvalidInput)
-            );
         });
+
+        for _ in 0..MAX_WHITELIST_ENTRIES_PER_SCOPE {
+            let addr = Address::generate(&env);
+            env.as_contract(&contract_id, || {
+                add(&env, &admin, &addr, &scope).unwrap();
+            });
+        }
+
+        let extra_addr = Address::generate(&env);
+        let result = env.as_contract(&contract_id, || {
+            add(&env, &admin, &extra_addr, &scope)
+        });
+        assert_eq!(result, Err(ContractError::InvalidInput));
     }
 
     #[test]

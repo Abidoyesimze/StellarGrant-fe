@@ -84,7 +84,9 @@ pub fn lock_payout(
         .get(&key)
         .ok_or(ContractError::LockupNotFound)?;
 
-    if record.status != LockupStatus::Active {
+    // A lockup holds a single payout; locking again would overwrite `amount`
+    // and strand the funds already transferred in.
+    if record.status != LockupStatus::Active || record.amount != 0 {
         return Err(ContractError::InvalidState);
     }
 
@@ -228,16 +230,98 @@ mod tests {
         });
     }
 
+    /// Registers a Stellar asset and mints `holder` enough to cover any payout
+    /// the tests lock.
+    fn funded_token(env: &Env, holder: &Address) -> Address {
+        let token = env
+            .register_stellar_asset_contract_v2(Address::generate(env))
+            .address();
+        soroban_sdk::token::StellarAssetClient::new(env, &token).mint(holder, &100_000);
+        token
+    }
+
     fn setup() -> (Env, Address, Address) {
         let env = Env::default();
-        env.mock_all_auths();
+        // lock_payout pulls funds from the holder through the token contract,
+        // which requires the holder's auth below the test's contract frame.
+        env.mock_all_auths_allowing_non_root_auth();
         let admin = Address::generate(&env);
         let owner = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
-        let grant = make_grant(&env, &owner);
-        Storage::set_grant(&env, 1, &grant);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            Storage::set_global_admin(&env, &admin);
+            let grant = make_grant(&env, &owner);
+            Storage::set_grant(&env, 1, &grant);
+        });
         set_ledger(&env, 1000, 100);
         (env, admin, owner)
+    }
+
+    // The functions under test read storage and call `require_auth`, so each
+    // call runs in its own contract frame, as a separate invocation would.
+
+    fn attach_lockup(
+        env: &Env,
+        owner: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+        lockup_duration_seconds: u64,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::attach_lockup(env, owner, grant_id, milestone_idx, lockup_duration_seconds)
+        })
+    }
+
+    fn lock_payout(
+        env: &Env,
+        grant_id: u64,
+        milestone_idx: u32,
+        holder: &Address,
+        token: &Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || {
+            super::lock_payout(env, grant_id, milestone_idx, holder, token, amount)
+        })
+    }
+
+    fn release(
+        env: &Env,
+        holder: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Result<i128, ContractError> {
+        crate::test_utils::in_contract(env, || super::release(env, holder, grant_id, milestone_idx))
+    }
+
+    fn revoke(
+        env: &Env,
+        admin: &Address,
+        grant_id: u64,
+        milestone_idx: u32,
+    ) -> Result<(), ContractError> {
+        crate::test_utils::in_contract(env, || super::revoke(env, admin, grant_id, milestone_idx))
+    }
+
+    fn get_lockup(env: &Env, grant_id: u64, milestone_idx: u32) -> Option<LockupRecord> {
+        crate::test_utils::in_contract(env, || super::get_lockup(env, grant_id, milestone_idx))
+    }
+
+    fn is_unlocked(env: &Env, grant_id: u64, milestone_idx: u32) -> bool {
+        crate::test_utils::in_contract(env, || super::is_unlocked(env, grant_id, milestone_idx))
+    }
+
+    fn trip_vesting(env: &Env, admin: &Address) {
+        crate::test_utils::in_contract(env, || {
+            crate::circuit_breaker::trip(
+                env,
+                admin,
+                crate::types::ProtocolModule::Vesting,
+                soroban_sdk::String::from_str(env, "test"),
+                None,
+            )
+            .unwrap();
+        });
     }
 
     // ── attach_lockup ─────────────────────────────────────────────────────
@@ -276,6 +360,7 @@ mod tests {
     fn attach_lockup_grant_not_found() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
         let owner = Address::generate(&env);
         set_ledger(&env, 1000, 100);
         let err = attach_lockup(&env, &owner, 999, 0, 604_800);
@@ -296,7 +381,8 @@ mod tests {
         attach_lockup(&env, &owner, 1, 0, 500).unwrap();
         let record = get_lockup(&env, 1, 0).unwrap();
         assert_eq!(record.unlocks_at, 1500);
-        assert_eq!(record.token, Storage::get_grant(&env, 1).unwrap().token);
+        let grant = crate::test_utils::in_contract(&env, || Storage::get_grant(&env, 1).unwrap());
+        assert_eq!(record.token, grant.token);
     }
 
     #[test]
@@ -314,30 +400,30 @@ mod tests {
     fn lock_payout_happy_path() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         let record = get_lockup(&env, 1, 0).unwrap();
         assert_eq!(record.amount, 5_000);
         assert_eq!(record.holder, admin);
-        assert_eq!(record.token, fake_token);
+        assert_eq!(record.token, payout_token);
         assert_eq!(record.locked_at, 1000);
     }
 
     #[test]
     fn lock_payout_unauthorized_non_admin() {
-        let (env, _admin, owner) = setup();
+        let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
         let stranger = Address::generate(&env);
-        let fake_token = Address::generate(&env);
-        let err = lock_payout(&env, 1, 0, &stranger, &fake_token, 5_000);
+        let payout_token = funded_token(&env, &admin);
+        let err = lock_payout(&env, 1, 0, &stranger, &payout_token, 5_000);
         assert_eq!(err, Err(ContractError::Unauthorized));
     }
 
     #[test]
     fn lock_payout_lockup_not_found() {
         let (env, admin, _owner) = setup();
-        let fake_token = Address::generate(&env);
-        let err = lock_payout(&env, 1, 0, &admin, &fake_token, 5_000);
+        let payout_token = funded_token(&env, &admin);
+        let err = lock_payout(&env, 1, 0, &admin, &payout_token, 5_000);
         assert_eq!(err, Err(ContractError::LockupNotFound));
     }
 
@@ -345,9 +431,9 @@ mod tests {
     fn lock_payout_already_locked() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
-        let err = lock_payout(&env, 1, 0, &admin, &fake_token, 3_000);
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
+        let err = lock_payout(&env, 1, 0, &admin, &payout_token, 3_000);
         assert_eq!(err, Err(ContractError::InvalidState));
     }
 
@@ -357,8 +443,8 @@ mod tests {
     fn release_before_unlocks_at_rejected() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         // Still within lockup period (1000 + 604800 = 605800, current is 1000)
         let err = release(&env, &admin, 1, 0);
         assert_eq!(err, Err(ContractError::NotYetUnlocked));
@@ -368,8 +454,8 @@ mod tests {
     fn release_after_unlocks_at_succeeds() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         // Advance past unlock time
         set_ledger(&env, 1200, 140);
         let amount = release(&env, &admin, 1, 0).unwrap();
@@ -383,8 +469,8 @@ mod tests {
     fn release_exactly_at_unlocks_at_succeeds() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 2_500).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 2_500).unwrap();
         // Advance to exactly unlock time
         set_ledger(&env, 1100, 120);
         let amount = release(&env, &admin, 1, 0).unwrap();
@@ -395,8 +481,8 @@ mod tests {
     fn release_wrong_holder_unauthorized() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         set_ledger(&env, 1200, 140);
         let stranger = Address::generate(&env);
         let err = release(&env, &stranger, 1, 0);
@@ -407,8 +493,8 @@ mod tests {
     fn release_double_release_rejected() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         set_ledger(&env, 1200, 140);
         release(&env, &admin, 1, 0).unwrap();
         let err = release(&env, &admin, 1, 0);
@@ -427,8 +513,8 @@ mod tests {
     fn release_returns_correct_amount() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 9_999).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 9_999).unwrap();
         set_ledger(&env, 1200, 140);
         let amount = release(&env, &admin, 1, 0).unwrap();
         assert_eq!(amount, 9_999);
@@ -485,8 +571,8 @@ mod tests {
     fn revoke_after_lock_payout() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         revoke(&env, &admin, 1, 0).unwrap();
         let record = get_lockup(&env, 1, 0).unwrap();
         assert_eq!(record.status, LockupStatus::Revoked);
@@ -520,8 +606,8 @@ mod tests {
     fn is_unlocked_false_after_release() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         set_ledger(&env, 1200, 140);
         release(&env, &admin, 1, 0).unwrap();
         assert!(!is_unlocked(&env, 1, 0));
@@ -556,31 +642,32 @@ mod tests {
     // ── authorization checks ──────────────────────────────────────────────
 
     #[test]
+    #[should_panic(expected = "Error(Auth, InvalidAction)")]
     fn attach_lockup_auth_check() {
         let env = Env::default();
         // Do NOT mock auths to verify require_auth is called
+        crate::test_utils::register_contract(&env);
         let owner = Address::generate(&env);
         let grant = make_grant(&env, &owner);
-        Storage::set_grant(&env, 1, &grant);
+        crate::test_utils::in_contract(&env, || Storage::set_grant(&env, 1, &grant));
         set_ledger(&env, 1000, 100);
-        // Without mock_all_auths, require_auth will fail for the non-sender
-        let err = attach_lockup(&env, &owner, 1, 0, 604_800);
-        assert!(err.is_err());
+        // Without mock_all_auths, require_auth traps for the owner
+        let _ = attach_lockup(&env, &owner, 1, 0, 604_800);
     }
 
     #[test]
     fn release_auth_check() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         set_ledger(&env, 2_000_000, 400_000);
 
-        // Turn off mock_all_auths to test real auth
+        // A fresh env doesn't have the lockup
         let env2 = Env::default();
         env2.mock_all_auths();
-        let admin2 = Address::generate(&env);
-        // This should fail because the new env doesn't have the lockup
+        crate::test_utils::register_contract(&env2);
+        let admin2 = Address::generate(&env2);
         let err = release(&env2, &admin2, 1, 0);
         assert_eq!(err, Err(ContractError::LockupNotFound));
     }
@@ -610,8 +697,8 @@ mod tests {
     fn release_immediately_when_zero_duration() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 0).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 1_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 1_000).unwrap();
         // Current time is 1000, unlocks_at is 1000, so now >= unlocks_at
         let amount = release(&env, &admin, 1, 0).unwrap();
         assert_eq!(amount, 1_000);
@@ -625,12 +712,12 @@ mod tests {
             g.id = 2;
             g
         };
-        Storage::set_grant(&env, 2, &grant2);
+        crate::test_utils::in_contract(&env, || Storage::set_grant(&env, 2, &grant2));
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
         attach_lockup(&env, &owner, 2, 0, 200).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 1_000).unwrap();
-        lock_payout(&env, 2, 0, &admin, &fake_token, 2_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 1_000).unwrap();
+        lock_payout(&env, 2, 0, &admin, &payout_token, 2_000).unwrap();
         // Release grant 1 at t=1100 (past 1000+100)
         set_ledger(&env, 1100, 120);
         let a1 = release(&env, &admin, 1, 0).unwrap();
@@ -647,14 +734,7 @@ mod tests {
         let (env, admin, owner) = setup();
 
         // Trip the Vesting circuit breaker
-        crate::circuit_breaker::trip(
-            &env,
-            &admin,
-            crate::types::ProtocolModule::Vesting,
-            soroban_sdk::String::from_str(&env, "test"),
-            None,
-        )
-        .unwrap();
+        trip_vesting(&env, &admin);
 
         // attach_lockup should fail with ModuleTripped
         let err = attach_lockup(&env, &owner, 1, 0, 604_800);
@@ -667,17 +747,10 @@ mod tests {
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
 
         // Trip the Vesting circuit breaker
-        crate::circuit_breaker::trip(
-            &env,
-            &admin,
-            crate::types::ProtocolModule::Vesting,
-            soroban_sdk::String::from_str(&env, "test"),
-            None,
-        )
-        .unwrap();
+        trip_vesting(&env, &admin);
 
-        let fake_token = Address::generate(&env);
-        let err = lock_payout(&env, 1, 0, &admin, &fake_token, 5_000);
+        let payout_token = funded_token(&env, &admin);
+        let err = lock_payout(&env, 1, 0, &admin, &payout_token, 5_000);
         assert_eq!(err, Err(ContractError::ModuleTripped));
     }
 
@@ -685,19 +758,12 @@ mod tests {
     fn vesting_circuit_breaker_blocks_release() {
         let (env, admin, owner) = setup();
         attach_lockup(&env, &owner, 1, 0, 100).unwrap();
-        let fake_token = Address::generate(&env);
-        lock_payout(&env, 1, 0, &admin, &fake_token, 5_000).unwrap();
+        let payout_token = funded_token(&env, &admin);
+        lock_payout(&env, 1, 0, &admin, &payout_token, 5_000).unwrap();
         set_ledger(&env, 1200, 140);
 
         // Trip the Vesting circuit breaker
-        crate::circuit_breaker::trip(
-            &env,
-            &admin,
-            crate::types::ProtocolModule::Vesting,
-            soroban_sdk::String::from_str(&env, "test"),
-            None,
-        )
-        .unwrap();
+        trip_vesting(&env, &admin);
 
         let err = release(&env, &admin, 1, 0);
         assert_eq!(err, Err(ContractError::ModuleTripped));
@@ -709,14 +775,7 @@ mod tests {
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();
 
         // Trip the Vesting circuit breaker
-        crate::circuit_breaker::trip(
-            &env,
-            &admin,
-            crate::types::ProtocolModule::Vesting,
-            soroban_sdk::String::from_str(&env, "test"),
-            None,
-        )
-        .unwrap();
+        trip_vesting(&env, &admin);
 
         let err = revoke(&env, &admin, 1, 0);
         assert_eq!(err, Err(ContractError::ModuleTripped));
@@ -727,21 +786,17 @@ mod tests {
         let (env, admin, owner) = setup();
 
         // Trip the Vesting circuit breaker
-        crate::circuit_breaker::trip(
-            &env,
-            &admin,
-            crate::types::ProtocolModule::Vesting,
-            soroban_sdk::String::from_str(&env, "test"),
-            None,
-        )
-        .unwrap();
+        trip_vesting(&env, &admin);
 
         // Verify attach_lockup is blocked
         let err = attach_lockup(&env, &owner, 1, 0, 604_800);
         assert_eq!(err, Err(ContractError::ModuleTripped));
 
         // Reset the breaker
-        crate::circuit_breaker::reset(&env, &admin, crate::types::ProtocolModule::Vesting).unwrap();
+        crate::test_utils::in_contract(&env, || {
+            crate::circuit_breaker::reset(&env, &admin, crate::types::ProtocolModule::Vesting)
+                .unwrap();
+        });
 
         // attach_lockup should now succeed
         attach_lockup(&env, &owner, 1, 0, 604_800).unwrap();

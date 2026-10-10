@@ -158,21 +158,22 @@ pub fn execute_relayed(
 /// Returns `Err` to propagate any underlying failure up so `execute_relayed`
 /// can refuse to burn the sender's quota. Each branch invokes the
 /// corresponding public entry point on this contract:
-///   * `ContributorRegister` / `MilestoneSubmit` — routed through
-///     `cross_contract::safe_call` so a trapped callee becomes a clean
-///     `ContractError` instead of aborting the relayed transaction.
-///   * `WithdrawStream` — calls the `streaming::withdraw_stream` helper
-///     directly so the recipient's accrued tokens move in the same
+///   * `ContributorRegister` — calls the shared registration logic
+///     directly; the sender's auth was already required by
+///     `execute_relayed`.
+///   * `MilestoneSubmit` — routed through `cross_contract::safe_call` so a
+///     trapped callee becomes a clean `ContractError` instead of aborting
+///     the relayed transaction.
+///   * `WithdrawStream` — calls the `streaming::withdraw_stream_authorized`
+///     helper directly so the recipient's accrued tokens move in the same
 ///     transaction.
 ///   * `ClaimVested` — no `claim_vested` entry point exists yet, so the
 ///     envelope is recorded in the `RelayRecord` for follow-up.
 ///
-/// TODO(security): in production the same-contract invoke for
-/// `contributor_register` / `milestone_submit` re-runs `require_auth()` on
-/// those inner entries. We rely on `env.mock_all_auths()` in tests; for
-/// mainnet, callers must explicitly authorize the inner auth (e.g. via a
-/// delegated signer scheme). When the inner auth fails, dispatch returns
-/// `Err` and the sender's quota is NOT burned — the safer default.
+/// TODO: the same-contract invoke for `milestone_submit` is contract
+/// re-entry, which the host rejects, so that dispatch currently always
+/// returns `Err` (and the sender's quota is NOT burned). It should call the
+/// submission logic directly, as `ContributorRegister` does.
 fn dispatch_action(
     env: &Env,
     sender: &Address,
@@ -181,18 +182,17 @@ fn dispatch_action(
     let contract_address = env.current_contract_address();
     match dispatch {
         RelayDispatch::ContributorRegister(payload) => {
-            let args: Vec<Val> = Vec::from_array(
+            // Called directly: invoking our own `contributor_register` entry
+            // would be contract re-entry, which the host rejects. The sender
+            // already authorized this relay in `execute_relayed`.
+            crate::internal_contributor_register(
                 env,
-                [
-                    sender.clone().into_val(env),
-                    payload.name.clone().into_val(env),
-                    payload.bio.clone().into_val(env),
-                    payload.skills.clone().into_val(env),
-                    payload.github_url.clone().into_val(env),
-                ],
-            );
-            let symbol = Symbol::new(env, "contributor_register");
-            crate::cross_contract::safe_call(env, &contract_address, &symbol, args)?;
+                sender,
+                payload.name.clone(),
+                payload.bio.clone(),
+                payload.skills.clone(),
+                payload.github_url.clone(),
+            )?;
         }
         RelayDispatch::MilestoneSubmit(payload) => {
             // Limitation: the inner `milestone_submit` rejects with
@@ -219,7 +219,8 @@ fn dispatch_action(
             // persisted in the `RelayRecord` for a follow-up call.
         }
         RelayDispatch::WithdrawStream(payload) => {
-            crate::streaming::withdraw_stream(env, sender, payload.stream_id)?;
+            // The sender already authorized this relay in `execute_relayed`.
+            crate::streaming::withdraw_stream_authorized(env, sender, payload.stream_id)?;
         }
     }
     Ok(())
@@ -390,8 +391,31 @@ mod tests {
         let grant_id = 1u64;
         let rate = 100i128;
         let duration = 100u32;
-        env.as_contract(&contract_id, || {
-            let _stream_id = crate::streaming::create_stream(
+        let stream_id = env.as_contract(&contract_id, || {
+            // Streams must be tied to an active grant.
+            Storage::set_grant(
+                &env,
+                grant_id,
+                &crate::types::Grant {
+                    id: grant_id,
+                    owner: sender.clone(),
+                    title: String::from_str(&env, "G"),
+                    description: String::from_str(&env, "D"),
+                    token: token_contract.clone(),
+                    status: crate::types::GrantStatus::Active,
+                    total_amount: 1_000,
+                    milestone_amount: 1_000,
+                    reviewers: Vec::new(&env),
+                    total_milestones: 1,
+                    milestones_paid_out: 0,
+                    escrow_balance: 0,
+                    funders: Vec::new(&env),
+                    reason: None,
+                    timestamp: 0,
+                    require_compliance: None,
+                },
+            );
+            crate::streaming::create_stream(
                 &env,
                 &sender,
                 &sender,
@@ -400,7 +424,7 @@ mod tests {
                 rate,
                 duration,
             )
-            .unwrap();
+            .unwrap()
         });
         env.ledger().with_mut(|li| li.sequence_number += 50);
 
@@ -408,7 +432,7 @@ mod tests {
 
         env.as_contract(&contract_id, || {
             let dispatch =
-                RelayDispatch::WithdrawStream(crate::types::WithdrawStreamPayload { stream_id: 0 });
+                RelayDispatch::WithdrawStream(crate::types::WithdrawStreamPayload { stream_id });
             execute_relayed(
                 &env,
                 &relayer,
@@ -500,7 +524,7 @@ mod tests {
             "quota must not be burned when dispatch fails"
         );
         assert_eq!(
-            Storage::get_relay_nonce(&env, &sender),
+            env.as_contract(&client.address, || Storage::get_relay_nonce(&env, &sender)),
             0,
             "nonce must not be burned when dispatch fails"
         );

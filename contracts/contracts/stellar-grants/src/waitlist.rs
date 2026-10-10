@@ -479,7 +479,9 @@ mod tests {
 
             join(&env, &applicant1, grant_id).unwrap();
             join(&env, &applicant2, grant_id).unwrap();
+        });
 
+        env.as_contract(&contract_id, || {
             // Promote first
             let promoted = promote_next(&env, &owner, grant_id).unwrap();
             assert_eq!(promoted, Some(applicant1.clone()));
@@ -550,13 +552,17 @@ mod tests {
             join(&env, &applicant1, grant_id).unwrap();
             join(&env, &applicant2, grant_id).unwrap();
             join(&env, &applicant3, grant_id).unwrap();
-
-            promote_next(&env, &owner, grant_id).unwrap();
-            promote_next(&env, &owner, grant_id).unwrap();
-
-            let result = promote_next(&env, &owner, grant_id);
-            assert_eq!(result, Err(ContractError::WaitlistFull));
         });
+
+        env.as_contract(&contract_id, || {
+            promote_next(&env, &owner, grant_id).unwrap();
+        });
+        env.as_contract(&contract_id, || {
+            promote_next(&env, &owner, grant_id).unwrap();
+        });
+
+        let result = env.as_contract(&contract_id, || promote_next(&env, &owner, grant_id));
+        assert_eq!(result, Err(ContractError::WaitlistFull));
     }
 
     #[test]

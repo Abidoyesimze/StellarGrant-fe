@@ -366,9 +366,18 @@ mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
 
-    #[test]
-    fn test_fund_pool() {
-        let env = soroban_sdk::Env::default();
+    macro_rules! reward_test {
+        ($name:ident, |$env:ident| $body:block) => {
+            #[test]
+            fn $name() {
+                let $env = soroban_sdk::Env::default();
+                let contract_id = $env.register(crate::StellarGrantsContract, ());
+                $env.as_contract(&contract_id, || $body);
+            }
+        };
+    }
+
+    reward_test!(test_fund_pool, |env| {
         let token = Address::generate(&env);
 
         fund_pool(&env, &token, 1000);
@@ -376,11 +385,9 @@ mod tests {
 
         fund_pool(&env, &token, 500);
         assert_eq!(pool_balance(&env, &token), 1500);
-    }
+    });
 
-    #[test]
-    fn test_record_participation() {
-        let env = soroban_sdk::Env::default();
+    reward_test!(test_record_participation, |env| {
         let reviewer = Address::generate(&env);
 
         record_participation(&env, &reviewer, 1, 0, false);
@@ -392,11 +399,9 @@ mod tests {
         let part = get_participation(&env, &reviewer, 1).expect("Participation should exist");
         assert_eq!(part.votes_cast, 2);
         assert_eq!(part.fast_votes, 1);
-    }
+    });
 
-    #[test]
-    fn test_fast_vote_bonus() {
-        let env = soroban_sdk::Env::default();
+    reward_test!(test_fast_vote_bonus, |env| {
         let reviewer1 = Address::generate(&env);
         let reviewer2 = Address::generate(&env);
 
@@ -412,11 +417,9 @@ mod tests {
         assert_eq!(part1.fast_votes, 0);
         assert_eq!(part2.fast_votes, 1);
         assert!(part2.last_vote_at >= part1.last_vote_at);
-    }
+    });
 
-    #[test]
-    fn test_claim_rewards_partial() {
-        let env = soroban_sdk::Env::default();
+    reward_test!(test_claim_rewards_partial, |env| {
         let reviewer = Address::generate(&env);
         let token = Address::generate(&env);
 
@@ -441,11 +444,9 @@ mod tests {
         // Note: claim_rewards would fail here because token transfer would fail
         // This test just verifies the partial logic
         assert!(pool_balance(&env, &token) == 100);
-    }
+    });
 
-    #[test]
-    fn test_get_reward_record() {
-        let env = soroban_sdk::Env::default();
+    reward_test!(test_get_reward_record, |env| {
         let reviewer = Address::generate(&env);
         let token = Address::generate(&env);
 
@@ -470,11 +471,9 @@ mod tests {
         let retrieved = get_reward_record(&env, &reviewer, &token).expect("Should exist");
         assert_eq!(retrieved.pending_amount, 500);
         assert_eq!(retrieved.total_earned, 1000);
-    }
+    });
 
-    #[test]
-    fn test_multiple_reviewers() {
-        let env = soroban_sdk::Env::default();
+    reward_test!(test_multiple_reviewers, |env| {
         let reviewer1 = Address::generate(&env);
         let reviewer2 = Address::generate(&env);
         let token = Address::generate(&env);
@@ -495,7 +494,7 @@ mod tests {
 
         assert_eq!(part1.fast_votes, 1);
         assert_eq!(part2.fast_votes, 0);
-    }
+    });
 
     #[test]
     fn test_claim_rewards_rejects_reentrant_call_when_guard_is_held() {

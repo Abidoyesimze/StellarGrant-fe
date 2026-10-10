@@ -229,9 +229,10 @@ mod tests {
     fn test_double_revoke_returns_invalid_state() {
         let env = Env::default();
         env.mock_all_auths();
-        with_contract(&env, || {
-            let verifier = Address::generate(&env);
-            let subject = Address::generate(&env);
+        let contract_id = env.register(crate::StellarGrantsContract, ());
+        let verifier = Address::generate(&env);
+        let subject = Address::generate(&env);
+        env.as_contract(&contract_id, || {
             Storage::set_verifier_contract(&env, &verifier);
             Storage::set_verification_attestation(
                 &env,
@@ -247,11 +248,9 @@ mod tests {
             );
 
             revoke(&env, &verifier, &subject).unwrap();
-            assert_eq!(
-                revoke(&env, &verifier, &subject),
-                Err(ContractError::InvalidState)
-            );
         });
+        let result = env.as_contract(&contract_id, || revoke(&env, &verifier, &subject));
+        assert_eq!(result, Err(ContractError::InvalidState));
     }
 
     #[test]

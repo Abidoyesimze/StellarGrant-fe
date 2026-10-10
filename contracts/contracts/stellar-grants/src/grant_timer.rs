@@ -266,9 +266,8 @@ fn cancel_grant_internal(env: &Env, grant_id: u64, reason: &String) -> Result<()
     // Forfeit collateral if applicable.
     if let Some(req) = crate::collateral::get_requirement(env, grant_id) {
         let forfeit_reason = String::from_str(env, "grant cancelled by timer");
-        let _ = crate::collateral::forfeit(
+        let _ = crate::collateral::forfeit_authorized(
             env,
-            &grant.owner,
             grant_id,
             &grant.owner,
             req.forfeit_on_abandon_bps,
@@ -643,8 +642,9 @@ mod tests {
     // `collateral::forfeit` with the wrong argument count/order (missing the
     // `caller` parameter added when auth was introduced there), which failed
     // to compile with E0061. Exercises the exact timer-triggered
-    // `cancel_grant_internal` -> `collateral::forfeit` call site and confirms
-    // collateral is actually forfeited for the correct amount.
+    // `cancel_grant_internal` -> `collateral::forfeit_authorized` call site
+    // and confirms collateral is actually forfeited for the correct amount
+    // without requiring the grant owner to sign the permissionless trigger.
     #[test]
     fn auto_cancel_forfeits_collateral_via_timer() {
         use crate::types::{CollateralDeposit, CollateralRequirement, CollateralStatus};

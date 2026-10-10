@@ -121,68 +121,80 @@ mod tests {
     fn test_set_param_non_dao_by_admin_succeeds() {
         let env = Env::default();
         env.mock_all_auths();
-        let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let key = Symbol::new(&env, "max_amount");
-        let desc = String::from_str(&env, "Maximum grant amount");
-        set_param(&env, &admin, key.clone(), make_value(100), desc, false).unwrap();
+            let key = Symbol::new(&env, "max_amount");
+            let desc = String::from_str(&env, "Maximum grant amount");
+            set_param(&env, &admin, key.clone(), make_value(100), desc, false).unwrap();
 
-        let record = get_param(&env, &key).unwrap();
-        assert_eq!(record.value.u32_val, Some(100));
-        assert!(!record.requires_dao_vote);
+            let record = get_param(&env, &key).unwrap();
+            assert_eq!(record.value.u32_val, Some(100));
+            assert!(!record.requires_dao_vote);
+        });
     }
 
     #[test]
     fn test_set_param_non_dao_by_non_admin_fails() {
         let env = Env::default();
         env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let stranger = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            let stranger = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let key = Symbol::new(&env, "max_amount");
-        let desc = String::from_str(&env, "desc");
-        let result = set_param(&env, &stranger, key, make_value(100), desc, false);
-        assert_eq!(result, Err(ContractError::Unauthorized));
+            let key = Symbol::new(&env, "max_amount");
+            let desc = String::from_str(&env, "desc");
+            let result = set_param(&env, &stranger, key, make_value(100), desc, false);
+            assert_eq!(result, Err(ContractError::Unauthorized));
+        });
     }
 
     #[test]
     fn test_set_param_dao_flagged_rejected_even_for_admin() {
         let env = Env::default();
         env.mock_all_auths();
-        let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
+        crate::test_utils::register_contract(&env);
+        crate::test_utils::in_contract(&env, || {
+            let admin = Address::generate(&env);
+            Storage::set_global_admin(&env, &admin);
 
-        let key = Symbol::new(&env, "quorum_bps");
-        let desc = String::from_str(&env, "Quorum threshold");
-        let result = set_param(&env, &admin, key, make_value(5001), desc, true);
-        assert_eq!(result, Err(ContractError::DaoVoteRequired));
+            let key = Symbol::new(&env, "quorum_bps");
+            let desc = String::from_str(&env, "Quorum threshold");
+            let result = set_param(&env, &admin, key, make_value(5001), desc, true);
+            assert_eq!(result, Err(ContractError::DaoVoteRequired));
+        });
     }
 
     #[test]
     fn test_dao_and_non_dao_paths_differ() {
         let env = Env::default();
         env.mock_all_auths();
+        crate::test_utils::register_contract(&env);
         let admin = Address::generate(&env);
-        Storage::set_global_admin(&env, &admin);
-
         let key = Symbol::new(&env, "fee_bps");
         let desc = String::from_str(&env, "Protocol fee");
+        crate::test_utils::in_contract(&env, || {
+            Storage::set_global_admin(&env, &admin);
 
-        // Non-DAO path: succeeds
-        let result_ok = set_param(
-            &env,
-            &admin,
-            key.clone(),
-            make_value(100),
-            desc.clone(),
-            false,
-        );
-        assert!(result_ok.is_ok());
-
-        // DAO path: rejected
-        let result_err = set_param(&env, &admin, key, make_value(200), desc, true);
-        assert_eq!(result_err, Err(ContractError::DaoVoteRequired));
+            // Non-DAO path: succeeds
+            let result_ok = set_param(
+                &env,
+                &admin,
+                key.clone(),
+                make_value(100),
+                desc.clone(),
+                false,
+            );
+            assert!(result_ok.is_ok());
+        });
+        crate::test_utils::in_contract(&env, || {
+            // DAO path: rejected
+            let result_err = set_param(&env, &admin, key, make_value(200), desc, true);
+            assert_eq!(result_err, Err(ContractError::DaoVoteRequired));
+        });
     }
 }

@@ -283,6 +283,50 @@ mod tests {
         (env, admin, contract_id)
     }
 
+    fn grant_role_via_client(
+        env: &Env,
+        contract_id: &Address,
+        granter: &Address,
+        grantee: &Address,
+        role: Role,
+        expires_at: Option<u64>,
+    ) {
+        crate::StellarGrantsContractClient::new(env, contract_id).rbac_grant_role(
+            granter,
+            grantee,
+            &role,
+            &expires_at,
+        );
+    }
+
+    fn revoke_role_via_client(
+        env: &Env,
+        contract_id: &Address,
+        revoker: &Address,
+        holder: &Address,
+        role: Role,
+    ) {
+        crate::StellarGrantsContractClient::new(env, contract_id)
+            .rbac_revoke_role(revoker, holder, &role);
+    }
+
+    fn role_members_via_client(env: &Env, contract_id: &Address, role: Role) -> Vec<Address> {
+        crate::StellarGrantsContractClient::new(env, contract_id).rbac_role_members(&role)
+    }
+
+    fn has_role_via_client(
+        env: &Env,
+        contract_id: &Address,
+        address: &Address,
+        role: Role,
+    ) -> bool {
+        crate::StellarGrantsContractClient::new(env, contract_id).rbac_has_role(address, &role)
+    }
+
+    fn roles_of_via_client(env: &Env, contract_id: &Address, address: &Address) -> Vec<Role> {
+        crate::StellarGrantsContractClient::new(env, contract_id).rbac_roles_of(address)
+    }
+
     // ── Bootstrap (#1077) ───────────────────────────────────────────────────
 
     #[test]
@@ -412,28 +456,38 @@ mod tests {
     #[test]
     fn grant_role_updates_members_list() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            let bob = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::OracleOperator, None).unwrap();
-            grant_role(&env, &admin, &bob, Role::OracleOperator, None).unwrap();
-            let members = role_members(&env, Role::OracleOperator);
-            assert_eq!(members.len(), 2);
-            assert!(members.contains(alice));
-            assert!(members.contains(bob));
-        });
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        grant_role_via_client(
+            &env,
+            &contract_id,
+            &admin,
+            &alice,
+            Role::OracleOperator,
+            None,
+        );
+        grant_role_via_client(
+            &env,
+            &contract_id,
+            &admin,
+            &bob,
+            Role::OracleOperator,
+            None,
+        );
+        let members = client.rbac_role_members(&Role::OracleOperator);
+        assert_eq!(members.len(), 2);
+        assert!(members.contains(alice));
+        assert!(members.contains(bob));
     }
 
     #[test]
     fn grant_same_role_twice_does_not_duplicate_member() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::Relayer, None).unwrap();
-            grant_role(&env, &admin, &alice, Role::Relayer, None).unwrap();
-            let members = role_members(&env, Role::Relayer);
-            assert_eq!(members.len(), 1);
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::Relayer, None);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::Relayer, None);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::Relayer).len(), 1);
     }
 
     // ── Revoke role ──────────────────────────────────────────────────────
@@ -441,12 +495,15 @@ mod tests {
     #[test]
     fn superadmin_can_revoke_roles() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::TreasuryManager, None).unwrap();
-            revoke_role(&env, &admin, &alice, Role::TreasuryManager).unwrap();
-            assert!(!has_role(&env, &alice, Role::TreasuryManager));
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager, None);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager);
+        assert!(!has_role_via_client(
+            &env,
+            &contract_id,
+            &alice,
+            Role::TreasuryManager
+        ));
     }
 
     // Issue #901
@@ -465,13 +522,11 @@ mod tests {
     #[test]
     fn revoke_removes_from_members_list() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::DisputeArbiter, None).unwrap();
-            assert_eq!(role_members(&env, Role::DisputeArbiter).len(), 1);
-            revoke_role(&env, &admin, &alice, Role::DisputeArbiter).unwrap();
-            assert_eq!(role_members(&env, Role::DisputeArbiter).len(), 0);
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter, None);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::DisputeArbiter).len(), 1);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::DisputeArbiter).len(), 0);
     }
 
     #[test]
@@ -500,27 +555,37 @@ mod tests {
     #[test]
     fn protocol_admin_cannot_revoke_protocol_admin() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let pa1 = Address::generate(&env);
-            let pa2 = Address::generate(&env);
-            grant_role(&env, &admin, &pa1, Role::ProtocolAdmin, None).unwrap();
-            grant_role(&env, &admin, &pa2, Role::ProtocolAdmin, None).unwrap();
-            let err = revoke_role(&env, &pa1, &pa2, Role::ProtocolAdmin);
-            assert_eq!(err, Err(ContractError::Unauthorized));
+        let pa1 = Address::generate(&env);
+        let pa2 = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &pa1, Role::ProtocolAdmin, None);
+        grant_role_via_client(&env, &contract_id, &admin, &pa2, Role::ProtocolAdmin, None);
+        let err = env.as_contract(&contract_id, || {
+            revoke_role(&env, &pa1, &pa2, Role::ProtocolAdmin)
         });
+        assert_eq!(err, Err(ContractError::Unauthorized));
     }
 
     #[test]
     fn protocol_admin_can_revoke_lesser_roles() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let pa = Address::generate(&env);
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &pa, Role::ProtocolAdmin, None).unwrap();
-            grant_role(&env, &admin, &alice, Role::ReviewerModerator, None).unwrap();
-            revoke_role(&env, &pa, &alice, Role::ReviewerModerator).unwrap();
-            assert!(!has_role(&env, &alice, Role::ReviewerModerator));
-        });
+        let pa = Address::generate(&env);
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &pa, Role::ProtocolAdmin, None);
+        grant_role_via_client(
+            &env,
+            &contract_id,
+            &admin,
+            &alice,
+            Role::ReviewerModerator,
+            None,
+        );
+        revoke_role_via_client(&env, &contract_id, &pa, &alice, Role::ReviewerModerator);
+        assert!(!has_role_via_client(
+            &env,
+            &contract_id,
+            &alice,
+            Role::ReviewerModerator
+        ));
     }
 
     // ── has_role / negative cases ─────────────────────────────────────────
@@ -567,12 +632,15 @@ mod tests {
     #[test]
     fn has_role_false_after_revoke() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::DisputeArbiter, None).unwrap();
-            revoke_role(&env, &admin, &alice, Role::DisputeArbiter).unwrap();
-            assert!(!has_role(&env, &alice, Role::DisputeArbiter));
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter, None);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter);
+        assert!(!has_role_via_client(
+            &env,
+            &contract_id,
+            &alice,
+            Role::DisputeArbiter
+        ));
     }
 
     // ── require_role / require_any_role ───────────────────────────────────
@@ -647,29 +715,25 @@ mod tests {
     #[test]
     fn roles_of_lists_all_granted_roles() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::TreasuryManager, None).unwrap();
-            grant_role(&env, &admin, &alice, Role::DisputeArbiter, None).unwrap();
-            let roles = roles_of(&env, &alice);
-            assert_eq!(roles.len(), 2);
-            assert!(roles.contains(Role::TreasuryManager));
-            assert!(roles.contains(Role::DisputeArbiter));
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager, None);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter, None);
+        let roles = roles_of_via_client(&env, &contract_id, &alice);
+        assert_eq!(roles.len(), 2);
+        assert!(roles.contains(Role::TreasuryManager));
+        assert!(roles.contains(Role::DisputeArbiter));
     }
 
     #[test]
     fn roles_of_excludes_revoked_roles() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::TreasuryManager, None).unwrap();
-            grant_role(&env, &admin, &alice, Role::OracleOperator, None).unwrap();
-            revoke_role(&env, &admin, &alice, Role::TreasuryManager).unwrap();
-            let roles = roles_of(&env, &alice);
-            assert_eq!(roles.len(), 1);
-            assert!(roles.contains(Role::OracleOperator));
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager, None);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::OracleOperator, None);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager);
+        let roles = roles_of_via_client(&env, &contract_id, &alice);
+        assert_eq!(roles.len(), 1);
+        assert!(roles.contains(Role::OracleOperator));
     }
 
     // ── renounce_role ─────────────────────────────────────────────────────
@@ -709,13 +773,13 @@ mod tests {
     #[test]
     fn renounce_already_revoked_role_fails() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::OracleOperator, None).unwrap();
-            revoke_role(&env, &admin, &alice, Role::OracleOperator).unwrap();
-            let err = renounce_role(&env, &alice, Role::OracleOperator);
-            assert_eq!(err, Err(ContractError::InvalidState));
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::OracleOperator, None);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::OracleOperator);
+        let err = env.as_contract(&contract_id, || {
+            renounce_role(&env, &alice, Role::OracleOperator)
         });
+        assert_eq!(err, Err(ContractError::InvalidState));
     }
 
     // ── Role-count tracking ───────────────────────────────────────────────
@@ -723,42 +787,38 @@ mod tests {
     #[test]
     fn grant_increases_member_count() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            let bob = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::ComplianceOfficer, None).unwrap();
-            assert_eq!(role_members(&env, Role::ComplianceOfficer).len(), 1);
-            grant_role(&env, &admin, &bob, Role::ComplianceOfficer, None).unwrap();
-            assert_eq!(role_members(&env, Role::ComplianceOfficer).len(), 2);
-        });
+        let client = crate::StellarGrantsContractClient::new(&env, &contract_id);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+
+        client.rbac_grant_role(&admin, &alice, &Role::ComplianceOfficer, &None);
+        assert_eq!(client.rbac_role_members(&Role::ComplianceOfficer).len(), 1);
+        client.rbac_grant_role(&admin, &bob, &Role::ComplianceOfficer, &None);
+        assert_eq!(client.rbac_role_members(&Role::ComplianceOfficer).len(), 2);
     }
 
     #[test]
     fn revoke_decreases_member_count() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            let bob = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::ComplianceOfficer, None).unwrap();
-            grant_role(&env, &admin, &bob, Role::ComplianceOfficer, None).unwrap();
-            revoke_role(&env, &admin, &alice, Role::ComplianceOfficer).unwrap();
-            assert_eq!(role_members(&env, Role::ComplianceOfficer).len(), 1);
-        });
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::ComplianceOfficer, None);
+        grant_role_via_client(&env, &contract_id, &admin, &bob, Role::ComplianceOfficer, None);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::ComplianceOfficer);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::ComplianceOfficer).len(), 1);
     }
 
     #[test]
     fn multiple_roles_independent_member_lists() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let alice = Address::generate(&env);
-            grant_role(&env, &admin, &alice, Role::TreasuryManager, None).unwrap();
-            grant_role(&env, &admin, &alice, Role::DisputeArbiter, None).unwrap();
-            assert_eq!(role_members(&env, Role::TreasuryManager).len(), 1);
-            assert_eq!(role_members(&env, Role::DisputeArbiter).len(), 1);
-            revoke_role(&env, &admin, &alice, Role::TreasuryManager).unwrap();
-            assert_eq!(role_members(&env, Role::TreasuryManager).len(), 0);
-            assert_eq!(role_members(&env, Role::DisputeArbiter).len(), 1);
-        });
+        let alice = Address::generate(&env);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager, None);
+        grant_role_via_client(&env, &contract_id, &admin, &alice, Role::DisputeArbiter, None);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::TreasuryManager).len(), 1);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::DisputeArbiter).len(), 1);
+        revoke_role_via_client(&env, &contract_id, &admin, &alice, Role::TreasuryManager);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::TreasuryManager).len(), 0);
+        assert_eq!(role_members_via_client(&env, &contract_id, Role::DisputeArbiter).len(), 1);
     }
 
     // ── All role variants ─────────────────────────────────────────────────
@@ -766,25 +826,23 @@ mod tests {
     #[test]
     fn can_grant_and_check_each_role_variant() {
         let (env, admin, contract_id) = setup();
-        env.as_contract(&contract_id, || {
-            let roles = [
-                Role::SuperAdmin,
-                Role::ProtocolAdmin,
-                Role::TreasuryManager,
-                Role::ComplianceOfficer,
-                Role::DisputeArbiter,
-                Role::OracleOperator,
-                Role::ReviewerModerator,
-                Role::EmergencyPauser,
-                Role::Relayer,
-            ];
-            for role in roles {
-                let user = Address::generate(&env);
-                grant_role(&env, &admin, &user, role.clone(), None).unwrap();
-                assert!(has_role(&env, &user, role.clone()));
-                let members = role_members(&env, role.clone());
-                assert!(members.contains(user));
-            }
-        });
+        let roles = [
+            Role::SuperAdmin,
+            Role::ProtocolAdmin,
+            Role::TreasuryManager,
+            Role::ComplianceOfficer,
+            Role::DisputeArbiter,
+            Role::OracleOperator,
+            Role::ReviewerModerator,
+            Role::EmergencyPauser,
+            Role::Relayer,
+        ];
+        for role in roles {
+            let user = Address::generate(&env);
+            grant_role_via_client(&env, &contract_id, &admin, &user, role.clone(), None);
+            assert!(has_role_via_client(&env, &contract_id, &user, role.clone()));
+            let members = role_members_via_client(&env, &contract_id, role);
+            assert!(members.contains(user));
+        }
     }
 }

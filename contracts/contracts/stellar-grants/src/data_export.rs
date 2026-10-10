@@ -395,46 +395,46 @@ mod tests {
         let (env, owner) = setup();
         let contract_id = env.register(crate::StellarGrantsContract, ());
         env.as_contract(&contract_id, || {
-        env.cost_estimate().disable_resource_limits();
-        env.cost_estimate().budget().reset_unlimited();
-        let overflow_count = MAX_GRANTS_PER_SCAN + 5;
-        let mut ids = soroban_sdk::Vec::new(&env);
-        for i in 1..=overflow_count as u64 {
-            ids.push_back(i);
-        }
-        env.storage()
-            .persistent()
-            .set(&DataKey::Grant(GrantKey::GlobalOrder), &ids);
+            env.cost_estimate().disable_resource_limits();
+            env.cost_estimate().budget().reset_unlimited();
+            let overflow_count = MAX_GRANTS_PER_SCAN + 5;
+            let mut ids = soroban_sdk::Vec::new(&env);
+            for i in 1..=overflow_count as u64 {
+                ids.push_back(i);
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::Grant(GrantKey::GlobalOrder), &ids);
 
-        let included_id = MAX_GRANTS_PER_SCAN as u64;
-        let excluded_id = included_id + 1;
-        for gid in [included_id, excluded_id] {
-            Storage::set_grant(&env, gid, &make_grant(&env, &owner));
-            Storage::set_milestone(
-                &env,
-                gid,
-                0,
-                &crate::types::Milestone {
-                    idx: 0,
-                    description: soroban_sdk::String::from_str(&env, "m"),
-                    amount: 100,
-                    state: crate::types::MilestoneState::Submitted,
-                    votes: soroban_sdk::Map::new(&env),
-                    approvals: 0,
-                    rejections: 0,
-                    reasons: soroban_sdk::Map::new(&env),
-                    status_updated_at: 1,
-                    proof_url: None,
-                    submission_timestamp: 1,
-                    deadline: None,
-                    reviewer_count_snapshot: 0,
-                    reviewer_list_snapshot: soroban_sdk::Vec::new(&env),
-                },
-            );
-        }
+            let included_id = MAX_GRANTS_PER_SCAN as u64;
+            let excluded_id = included_id + 1;
+            for gid in [included_id, excluded_id] {
+                Storage::set_grant(&env, gid, &make_grant(&env, &owner));
+                Storage::set_milestone(
+                    &env,
+                    gid,
+                    0,
+                    &crate::types::Milestone {
+                        idx: 0,
+                        description: soroban_sdk::String::from_str(&env, "m"),
+                        amount: 100,
+                        state: crate::types::MilestoneState::Submitted,
+                        votes: soroban_sdk::Map::new(&env),
+                        approvals: 0,
+                        rejections: 0,
+                        reasons: soroban_sdk::Map::new(&env),
+                        status_updated_at: 1,
+                        proof_url: None,
+                        submission_timestamp: 1,
+                        deadline: None,
+                        reviewer_count_snapshot: 0,
+                        reviewer_list_snapshot: soroban_sdk::Vec::new(&env),
+                    },
+                );
+            }
 
-        let result = export_milestones_since(&env, 0, 0, 50);
-        assert_eq!(result.total, 1);
+            let result = export_milestones_since(&env, 0, 0, 50);
+            assert_eq!(result.total, 1);
         });
     }
 

@@ -340,9 +340,7 @@ mod tests {
         }
 
         let extra_addr = Address::generate(&env);
-        let result = env.as_contract(&contract_id, || {
-            add(&env, &admin, &extra_addr, &scope)
-        });
+        let result = env.as_contract(&contract_id, || add(&env, &admin, &extra_addr, &scope));
         assert_eq!(result, Err(ContractError::InvalidInput));
     }
 

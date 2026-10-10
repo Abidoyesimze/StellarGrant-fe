@@ -669,9 +669,7 @@ mod tests {
         env.as_contract(&cid, || {
             cast_arbiter_vote(&env, &voter, case_id, true, 50).unwrap();
         });
-        let res = env.as_contract(&cid, || {
-            cast_arbiter_vote(&env, &voter, case_id, false, 50)
-        });
+        let res = env.as_contract(&cid, || cast_arbiter_vote(&env, &voter, case_id, false, 50));
         assert_eq!(res, Err(ContractError::AlreadyVoted));
     }
 

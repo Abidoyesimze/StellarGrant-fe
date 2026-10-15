@@ -37,24 +37,20 @@ export function useIPFSContent(cid: string | null): UseIPFSContentResult {
 
     const cached = contentCache.get(cid);
     if (cached) {
-      queueMicrotask(() => {
-        setContent(cached.content);
-        setContentType(cached.contentType);
-        setGatewayUsed(cached.gatewayUsed);
-        setIsLoading(false);
-        setError(null);
-      });
+      setContent(cached.content);
+      setContentType(cached.contentType);
+      setGatewayUsed(cached.gatewayUsed);
+      setIsLoading(false);
+      setError(null);
       return;
     }
 
     cancelledRef.current = false;
-    queueMicrotask(() => {
-      setIsLoading(true);
-      setError(null);
-      setContent(null);
-      setContentType(null);
-      setGatewayUsed(null);
-    });
+    setIsLoading(true);
+    setError(null);
+    setContent(null);
+    setContentType(null);
+    setGatewayUsed(null);
 
     (async () => {
       try {

@@ -7,6 +7,23 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  Account,
+  Asset,
+  BASE_FEE,
+  Keypair,
+  Operation,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+
+vi.mock("../lib/stellar/client", () => ({
+  getRpcClient: vi.fn(),
+  networkPassphraseConfig: "Test SDF Network ; September 2015",
+}));
+
+import { getRpcClient, networkPassphraseConfig } from "../lib/stellar/client";
+import {
+  buildUnsignedTransaction,
   combineSignatures,
   isValidTransactionXdr,
   MultiSigTracker,
@@ -35,6 +52,53 @@ describe("isValidTransactionXdr", () => {
 
   it("returns false for random base64", () => {
     expect(isValidTransactionXdr("aGVsbG8gd29ybGQ=")).toBe(false);
+  });
+});
+
+// ── buildUnsignedTransaction ──────────────────────────────────────────────
+
+describe("buildUnsignedTransaction", () => {
+  it("accepts a full TransactionEnvelope XDR produced by a contract client", async () => {
+    const source = Keypair.random().publicKey();
+    const dest = Keypair.random().publicKey();
+    const account = new Account(source, "0");
+
+    vi.mocked(getRpcClient).mockReturnValue({
+      getAccount: vi.fn().mockResolvedValue(account),
+    } as any);
+
+    const originalTx = new TransactionBuilder(account, {
+      fee: BASE_FEE.toString(),
+      networkPassphrase: networkPassphraseConfig,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: dest,
+          asset: Asset.native(),
+          amount: "10",
+        })
+      )
+      .setTimeout(30)
+      .build();
+
+    const builtXdr = await buildUnsignedTransaction({
+      sourceAddress: source,
+      operationsXdr: originalTx.toEnvelope().toXDR("base64"),
+      timeoutSeconds: 30,
+    });
+
+    const rebuilt = TransactionBuilder.fromXDR(
+      xdr.TransactionEnvelope.fromXDR(builtXdr, "base64"),
+      networkPassphraseConfig,
+    );
+    expect(rebuilt.source).toBe(source);
+    expect(builtXdr.length).toBeGreaterThan(0);
+    expect(() => {
+      TransactionBuilder.fromXDR(
+        xdr.TransactionEnvelope.fromXDR(builtXdr, "base64"),
+        networkPassphraseConfig,
+      );
+    }).not.toThrow();
   });
 });
 

@@ -4,7 +4,11 @@ export const IPFS_GATEWAYS = [
   "https://gateway.pinata.cloud/ipfs",
   "https://dweb.link/ipfs",
   "https://ipfs.filebase.io/ipfs",
-];
+] as const;
+
+export const IPFS_GATEWAY_ORIGINS = Array.from(
+  new Set(IPFS_GATEWAYS.map((gateway) => new URL(gateway).origin))
+);
 
 // Populated by detectFastestGateway(); used as the first attempt in fetchFromIPFS.
 let fastestGateway: string | null = null;

@@ -5,7 +5,42 @@
  * window — ensure popups are not blocked for your site.
  */
 
+import { FeeBumpTransaction, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
 import type { WalletAdapter } from "./types";
+
+export function verifySignedTransactionMatchesOriginal(
+  originalTxXdr: string,
+  signedTxXdr: string,
+  networkPassphrase: string,
+): void {
+  const parseTx = (name: string, txXdr: string) => {
+    try {
+      const envelope = xdr.TransactionEnvelope.fromXDR(txXdr, "base64");
+      const tx = TransactionBuilder.fromXDR(envelope, networkPassphrase);
+      if (tx instanceof FeeBumpTransaction) {
+        throw new Error("FeeBumpTransaction is not supported for wallet signing validation");
+      }
+      return tx;
+    } catch (error) {
+      throw new Error(`Invalid ${name} transaction XDR: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const original = parseTx("original", originalTxXdr);
+  const signed = parseTx("signed", signedTxXdr);
+
+  if (!original.hash().equals(signed.hash())) {
+    throw new Error("Signed transaction does not match the original transaction hash.");
+  }
+
+  if (original.source !== signed.source) {
+    throw new Error("Signed transaction source account does not match the original transaction.");
+  }
+
+  if (original.sequence !== signed.sequence) {
+    throw new Error("Signed transaction sequence number does not match the original transaction.");
+  }
+}
 
 type AlbedoNetwork = "testnet" | "public";
 
@@ -62,6 +97,13 @@ export class AlbedoAdapter implements WalletAdapter {
     if (!response?.signed_envelope_xdr) {
       throw new Error("Albedo did not return a signed transaction envelope.");
     }
+
+    verifySignedTransactionMatchesOriginal(
+      txXdr,
+      response.signed_envelope_xdr,
+      networkPassphrase,
+    );
+
     return response.signed_envelope_xdr;
   }
 

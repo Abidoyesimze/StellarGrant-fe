@@ -1,6 +1,7 @@
 import path from "path";
 import type { NextConfig } from "next";
 import bundleAnalyzer from "@next/bundle-analyzer";
+import { IPFS_GATEWAY_ORIGINS } from "@/lib/ipfs/gateway";
 
 const withBundleAnalyzer = bundleAnalyzer({
   enabled: process.env.ANALYZE === "true",
@@ -11,12 +12,14 @@ const ContentSecurityPolicy = `
   script-src 'self' 'unsafe-eval' 'unsafe-inline';
   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
   font-src 'self' https://fonts.gstatic.com;
-  img-src 'self' data: https://ipfs.io https://gateway.pinata.cloud blob:;
+  img-src 'self' data: https://ipfs.io https://gateway.pinata.cloud https://cloudflare-ipfs.com https://dweb.link https://ipfs.filebase.io blob:;
   connect-src 'self'
+    ${IPFS_GATEWAY_ORIGINS.join(" ")}
     https://horizon-testnet.stellar.org
     https://horizon.stellar.org
     https://soroban-testnet.stellar.org
     https://api.pinata.cloud
+    https://gateway.pinata.cloud
     ${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}
     ws: wss:;
   frame-src 'none';

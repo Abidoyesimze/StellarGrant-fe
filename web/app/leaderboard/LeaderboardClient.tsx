@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { LeaderboardTable, type LeaderboardEntry } from "@/components/leaderboard";
 import { Pagination } from "@/components/ui/Pagination";
-import { API_URL, LEADERBOARD_PAGE_SIZE } from "@/lib/constants";
+import { LEADERBOARD_PAGE_SIZE } from "@/lib/constants";
 
 interface LeaderboardResponse {
   entries: LeaderboardEntry[];
@@ -30,8 +30,9 @@ export default function LeaderboardClient() {
   const fetchLeaderboard = useCallback(async (currentPage: number) => {
     setIsLoading(true);
     try {
+      // Same-origin proxy — never hit NEXT_PUBLIC_API_URL from the browser.
       const res = await fetch(
-        `${API_URL}/leaderboard?page=${currentPage}&limit=${LEADERBOARD_PAGE_SIZE}`
+        `/api/leaderboard?page=${currentPage}&limit=${LEADERBOARD_PAGE_SIZE}`,
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: LeaderboardResponse = await res.json();

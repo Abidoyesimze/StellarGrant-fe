@@ -133,6 +133,9 @@ export class RealSorobanClient implements SorobanContractClient {
     const owner = m.has("owner")
       ? decodeAddress(m.get("owner")!)
       : undefined;
+    const token = m.has("token")
+      ? decodeAddress(m.get("token")!)
+      : "native";
 
     let milestones: SorobanMilestone[] | undefined;
     if (m.has("milestones")) {
@@ -140,7 +143,7 @@ export class RealSorobanClient implements SorobanContractClient {
       milestones = vec.map((item) => this.decodeMilestone(item));
     }
 
-    return { id, title, status, recipient, totalAmount, owner, milestones };
+    return { id, title, status, recipient, totalAmount, owner, token, milestones };
   }
 
   private decodeMilestone(val: xdr.ScVal): SorobanMilestone {

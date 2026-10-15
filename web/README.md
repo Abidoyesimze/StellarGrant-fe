@@ -127,15 +127,15 @@ NEXT_PUBLIC_USDC_TOKEN=CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 
 # ── IPFS (for milestone proof uploads) ────────────────────
 NEXT_PUBLIC_IPFS_GATEWAY=https://gateway.pinata.cloud/ipfs
-PINATA_API_KEY=your_pinata_api_key
-PINATA_SECRET_KEY=your_pinata_secret_key
+# Server-only; consumed by the /api/ipfs route.
+PINATA_JWT=your_pinata_jwt
 
 # ── Analytics (optional) ──────────────────────────────────
 NEXT_PUBLIC_POSTHOG_KEY=
 NEXT_PUBLIC_POSTHOG_HOST=https://app.posthog.com
 ```
 
-⚠️ **Security Note**: Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser. Never prefix secrets (API keys, private keys) with `NEXT_PUBLIC_`. Server-only secrets like `PINATA_SECRET_KEY` are only available in API routes and server components.
+⚠️ **Security Note**: Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser. Never prefix secrets (API keys, private keys) with `NEXT_PUBLIC_`. Server-only secrets like `PINATA_JWT` are only available in API routes and server components.
 
 ## 📦 Tech Stack
 

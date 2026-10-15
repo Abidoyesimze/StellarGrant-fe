@@ -16,7 +16,6 @@ const STATUS_OPTIONS = [
   { label: "All", value: "" },
   { label: "Pending", value: "open" },
   { label: "Active", value: "active" },
-  { label: "In Progress", value: "active" },
   { label: "Completed", value: "completed" },
   { label: "Cancelled", value: "cancelled" },
 ] as const;
@@ -205,7 +204,7 @@ export default function GrantsPage() {
         <div className="flex flex-wrap gap-2 items-center">
           {isLoading ? (
             <>
-              {Array.from({ length: 6 }).map((_, i) => (
+              {Array.from({ length: STATUS_OPTIONS.length }).map((_, i) => (
                 <div key={i} className="shimmer rounded-none h-8 w-20" />
               ))}
             </>

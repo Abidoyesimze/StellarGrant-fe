@@ -89,16 +89,35 @@ export interface SubmitOptions {
  * @param options - Source account, operations, fee, and timeout
  * @returns Base64-encoded unsigned transaction XDR
  */
+function isEnvelopeXdr(xdrString: TransactionXdr): boolean {
+  try {
+    const envelope = xdr.TransactionEnvelope.fromXDR(xdrString, "base64");
+    const tx = TransactionBuilder.fromXDR(envelope, networkPassphraseConfig);
+    return !(tx instanceof FeeBumpTransaction) && tx.operations.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function buildUnsignedTransaction(
   options: BuildUnsignedTxOptions
 ): Promise<TransactionXdr> {
   const { sourceAddress, operationsXdr, fee = 100, timeoutSeconds = 30 } = options;
   const rpc = getRpcClient();
-
-  // Load the source account to get the current sequence number
   const account = await rpc.getAccount(sourceAddress);
 
-  // Deserialize the operation from XDR
+  if (isEnvelopeXdr(operationsXdr)) {
+    const envelope = xdr.TransactionEnvelope.fromXDR(operationsXdr, "base64");
+    const tx = TransactionBuilder.fromXDR(envelope, networkPassphraseConfig);
+    if (tx instanceof FeeBumpTransaction) {
+      throw new Error("FeeBumpTransaction is not supported in multi-sig mode");
+    }
+    if (tx.source !== sourceAddress) {
+      throw new Error("Transaction envelope source account does not match the requested signer");
+    }
+    return operationsXdr;
+  }
+
   const operation = xdr.Operation.fromXDR(operationsXdr, "base64");
 
   const tx = new TransactionBuilder(account, {

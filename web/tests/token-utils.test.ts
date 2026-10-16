@@ -69,6 +69,16 @@ describe("formatTokenAmount", () => {
       expect(formatTokenAmount(10000000, 7)).toBe("1");
     });
 
+    it("should reject number input above MAX_SAFE_INTEGER", () => {
+      expect(formatTokenAmount(Number.MAX_SAFE_INTEGER + 2, 7)).toBe("Invalid");
+      expect(formatTokenAmount(Infinity, 7, { symbol: "XLM", showSymbol: true })).toBe("Invalid XLM");
+    });
+
+    it("should format amounts above MAX_SAFE_INTEGER exactly as bigint/string", () => {
+      expect(formatTokenAmount(90071992547409930000000n, 7)).toBe("9,007,199,254,740,993");
+      expect(formatTokenAmount("90071992547409930000000", 7)).toBe("9,007,199,254,740,993");
+    });
+
     it("should handle string input", () => {
       expect(formatTokenAmount("10000000", 7)).toBe("1");
     });

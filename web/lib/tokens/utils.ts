@@ -8,7 +8,10 @@ import type { TokenMetadata as _TokenMetadata } from "@/types";
 
 /**
  * Format a token amount for display
- * @param amount - The raw amount (in smallest units, e.g., stroops)
+ * @param amount - The raw amount (in smallest units, e.g., stroops). Pass a
+ *   bigint or numeric string for values that may exceed Number.MAX_SAFE_INTEGER;
+ *   unsafe `number` inputs are rejected as "Invalid" rather than silently
+ *   formatted with lost precision.
  * @param decimals - Number of decimals for the token
  * @param options - Formatting options
  * @returns Formatted amount string
@@ -41,7 +44,12 @@ export function formatTokenAmount(
       return showSymbol && symbol ? `Invalid ${symbol}` : "Invalid";
     }
   } else {
-    // number - convert carefully to avoid precision loss
+    // A number above MAX_SAFE_INTEGER has already lost precision before it
+    // reaches us, so rounding cannot recover it. Callers must pass a bigint
+    // or numeric string for amounts that may exceed the safe range.
+    if (!Number.isFinite(amount) || Math.abs(amount) > Number.MAX_SAFE_INTEGER) {
+      return showSymbol && symbol ? `Invalid ${symbol}` : "Invalid";
+    }
     amountBigInt = BigInt(Math.round(amount));
   }
 

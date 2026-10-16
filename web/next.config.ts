@@ -18,7 +18,6 @@ const ContentSecurityPolicy = `
     https://horizon-testnet.stellar.org
     https://horizon.stellar.org
     https://soroban-testnet.stellar.org
-    https://api.pinata.cloud
     https://gateway.pinata.cloud
     ${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}
     ws: wss:;

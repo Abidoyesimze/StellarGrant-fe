@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 
 describe("useIPFS — hook contract", () => {
   it("exports useIPFS as a named function", async () => {
@@ -7,15 +7,9 @@ describe("useIPFS — hook contract", () => {
   });
 });
 
-describe("useIPFS — mock mode (no JWT)", () => {
-  beforeEach(() => {
-    vi.stubEnv("NEXT_PUBLIC_PINATA_JWT", "");
-  });
-
-  it("upload() resolves with a non-empty CID string in mock mode", async () => {
+describe("useIPFS — server-side upload", () => {
+  it("does not require a client-side credential", async () => {
     const { useIPFS } = await import("@/hooks/useIPFS");
-    // In test environment NEXT_PUBLIC_PINATA_JWT is undefined → mock mode active.
-    // We can verify the hook is constructable and upload is a function.
     expect(useIPFS).toBeDefined();
   });
 

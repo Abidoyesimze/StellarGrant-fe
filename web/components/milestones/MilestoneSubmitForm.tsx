@@ -13,7 +13,10 @@ import { z } from "zod";
 import { xdr, Address, nativeToScVal } from "@stellar/stellar-sdk";
 import { useWallet } from "@/hooks/useWallet";
 import { useIPFS } from "@/hooks/useIPFS";
-import { useContractTransaction } from "@/hooks/useContractTransaction";
+import {
+  ContractTransactionError,
+  useContractTransaction,
+} from "@/hooks/useContractTransaction";
 import { useGrant } from "@/hooks/useGrant";
 import { useMilestone } from "@/hooks/useMilestone";
 import { Upload, X, Check, Loader2 } from "lucide-react";
@@ -195,24 +198,30 @@ export function MilestoneSubmitForm({
 
       // Execute transaction via the hook
       // Try both possible contract method naming conventions
-      const txHash = await tx.execute({
-        method: "milestone_submit",
-        args: scArgs,
-        onSuccess: async () => {
-          await refetchMilestone();
-          onSuccess?.();
-        },
-      });
+      const handleSuccess = async () => {
+        await refetchMilestone();
+        onSuccess?.();
+      };
 
-      if (!txHash) {
-        // Fallback for cases where contract uses camelCase bindings in wrapper methods
+      try {
+        await tx.execute({
+          method: "milestone_submit",
+          args: scArgs,
+          onSuccess: handleSuccess,
+        });
+      } catch (err) {
+        if (
+          !(err instanceof ContractTransactionError) ||
+          err.code !== "METHOD_NOT_FOUND"
+        ) {
+          throw err;
+        }
+
+        // Only a missing snake_case method warrants trying the camelCase binding.
         await tx.execute({
           method: "milestoneSubmit",
           args: scArgs,
-          onSuccess: async () => {
-            await refetchMilestone();
-            onSuccess?.();
-          },
+          onSuccess: handleSuccess,
         });
       }
 

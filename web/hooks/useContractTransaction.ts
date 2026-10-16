@@ -31,8 +31,25 @@ interface ExecuteOptions {
   onError?: (error: Error) => void;
 }
 
+export type ContractTransactionErrorCode =
+  | "WALLET_NOT_CONNECTED"
+  | "USER_REJECTED"
+  | "METHOD_NOT_FOUND"
+  | "SIMULATION_FAILED"
+  | "TRANSACTION_FAILED";
+
+export class ContractTransactionError extends Error {
+  constructor(
+    public readonly code: ContractTransactionErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ContractTransactionError";
+  }
+}
+
 interface UseContractTransactionResult {
-  execute: (options: ExecuteOptions) => Promise<string | null>;
+  execute: (options: ExecuteOptions) => Promise<string>;
   isPending: boolean;
   isSimulating: boolean;
   isSuccess: boolean;
@@ -45,6 +62,12 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 5000;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 60000;
+
+function isMethodNotFoundError(message: string): boolean {
+  return /(?:method|function|export).*(?:not found|unknown|missing)|unknown (?:method|function|export)|missing export/i.test(
+    message,
+  );
+}
 
 export function useContractTransaction(): UseContractTransactionResult {
   const { address, signTransaction: walletSign } = useWallet();
@@ -62,14 +85,14 @@ export function useContractTransaction(): UseContractTransactionResult {
     setError(null);
   };
 
-  const execute = async (options: ExecuteOptions): Promise<string | null> => {
+  const execute = async (options: ExecuteOptions): Promise<string> => {
     const { method, args, xdr: xdrString, onSuccess, onError } = options;
 
     if (!address) {
-      const err = new Error("Wallet not connected");
+      const err = new ContractTransactionError("WALLET_NOT_CONNECTED", "Wallet not connected");
       setError(err.message);
       onError?.(err);
-      return null;
+      throw err;
     }
 
     reset();
@@ -104,7 +127,11 @@ export function useContractTransaction(): UseContractTransactionResult {
       const simulationResult = await rpcClient.simulateTransaction(transaction);
 
       if (SorobanRpc.Api.isSimulationError(simulationResult)) {
-        throw new Error(`Simulation failed: ${simulationResult.error}`);
+        const message = `Simulation failed: ${simulationResult.error}`;
+        throw new ContractTransactionError(
+          isMethodNotFoundError(message) ? "METHOD_NOT_FOUND" : "SIMULATION_FAILED",
+          message,
+        );
       }
 
       setIsSimulating(false);
@@ -117,13 +144,16 @@ export function useContractTransaction(): UseContractTransactionResult {
       let signedXdr: string;
       try {
         signedXdr = await walletSign(preparedXdr);
-      } catch (_err) {
+      } catch {
         toast({
           title: "Transaction rejected",
           description: "You rejected the signing request.",
           variant: "warning",
         });
-        throw new Error("Transaction rejected by user");
+        throw new ContractTransactionError(
+          "USER_REJECTED",
+          "Transaction rejected by user",
+        );
       }
 
       setIsPending(true);
@@ -182,19 +212,30 @@ export function useContractTransaction(): UseContractTransactionResult {
 
       throw new Error("Transaction confirmation timeout");
     } catch (_err) {
-      const message = _err instanceof Error ? _err.message : "Transaction failed";
-      setError(message);
+      const transactionError =
+        _err instanceof ContractTransactionError
+          ? _err
+          : new ContractTransactionError(
+              "TRANSACTION_FAILED",
+              _err instanceof Error ? _err.message : "Transaction failed",
+            );
+      setError(transactionError.message);
       setIsPending(false);
       setIsSimulating(false);
-      onError?.(_err instanceof Error ? _err : new Error(message));
+      onError?.(transactionError);
 
-      toast({
-        title: "Transaction failed",
-        description: message,
-        variant: "error",
-      });
+      if (
+        transactionError.code !== "USER_REJECTED" &&
+        transactionError.code !== "METHOD_NOT_FOUND"
+      ) {
+        toast({
+          title: "Transaction failed",
+          description: transactionError.message,
+          variant: "error",
+        });
+      }
 
-      return null;
+      throw transactionError;
     }
   };
 

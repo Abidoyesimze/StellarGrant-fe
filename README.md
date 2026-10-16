@@ -342,9 +342,9 @@ NEXT_PUBLIC_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
 NEXT_PUBLIC_API_URL=http://localhost:4000
 
 # ── IPFS / Pinata ─────────────────────────────────────────────────────────────
-# JWT from https://app.pinata.cloud/keys
-# If omitted, useIPFS falls back to mock mode (no real upload, no crash).
-NEXT_PUBLIC_PINATA_JWT=
+# Server-only JWT from https://app.pinata.cloud/keys (used by /api/ipfs).
+# Never prefix this credential with NEXT_PUBLIC_.
+PINATA_JWT=
 ```
 
 > **Security**: Variables prefixed `NEXT_PUBLIC_` are bundled into the client. Never prefix secrets with `NEXT_PUBLIC_`.

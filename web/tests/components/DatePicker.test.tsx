@@ -56,7 +56,7 @@ describe("DatePicker", () => {
   });
 
   it("shows the relative label for a future date", () => {
-    render(<DatePicker value="2026-07-30" onChange={() => {}} />);
+    render(<DatePicker value="2027-12-31" onChange={() => {}} />);
     // Far future from "now" — at minimum the "In … days" text renders.
     expect(screen.getByText(/^In \d+ days$/)).toBeTruthy();
   });

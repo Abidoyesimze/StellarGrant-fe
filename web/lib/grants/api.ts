@@ -30,6 +30,8 @@ export interface ApiGrantDetail {
   status: string;
   recipient: string;
   totalAmount: string;
+  /** Funding token — "native"/XLM, "USDC", or a SAC contract address. */
+  token?: string;
   updatedAt?: string;
   isWatched?: boolean;
   milestones?: ApiEnrichedMilestone[];
@@ -38,6 +40,25 @@ export interface ApiGrantDetail {
     submitted: number;
     overdue: number;
   };
+}
+
+/**
+ * Normalise API token labels to the frontend sentinel values.
+ * Mock/backend may return "XLM"; the app uses "native" for XLM.
+ */
+export function normalizeGrantToken(token: string | undefined | null): string {
+  if (!token || token.trim() === "") return "native";
+  const trimmed = token.trim();
+  if (trimmed.toLowerCase() === "xlm" || trimmed.toLowerCase() === "native") {
+    return "native";
+  }
+  return trimmed;
+}
+
+function resolveGrantToken(data: ApiGrantDetail): string {
+  if (data.token) return normalizeGrantToken(data.token);
+  const milestoneToken = data.milestones?.find((m) => m.token)?.token;
+  return normalizeGrantToken(milestoneToken);
 }
 
 export interface GrantDetailPayload {
@@ -117,7 +138,7 @@ export function mapApiGrantDetail(data: ApiGrantDetail, funded = 0n): GrantDetai
     created_at: data.updatedAt
       ? BigInt(Math.floor(new Date(data.updatedAt).getTime() / 1000))
       : 0n,
-    token: "native",
+    token: resolveGrantToken(data),
   };
 
   const completedMilestones =

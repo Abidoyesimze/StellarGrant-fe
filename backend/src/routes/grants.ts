@@ -40,6 +40,17 @@ const defaultGrantsData: Record<number, { title: string; description: string }> 
   },
 };
 
+function resolveGrantToken(grant: Grant): string {
+  if (grant.token && grant.token.trim() !== "") {
+    return grant.token;
+  }
+  const draftToken = grant.draftData?.budgetToken;
+  if (typeof draftToken === "string" && draftToken.trim() !== "") {
+    return draftToken === "XLM" ? "native" : draftToken;
+  }
+  return "native";
+}
+
 function localizeGrant(grant: Grant, lang?: string): Record<string, unknown> {
   const grantId = grant.id;
   const defaults = defaultGrantsData[grantId] || { title: grant.title, description: grant.description || "" };
@@ -48,6 +59,7 @@ function localizeGrant(grant: Grant, lang?: string): Record<string, unknown> {
     ...grant,
     title: defaults.title,
     description: defaults.description || null,
+    token: resolveGrantToken(grant),
   };
 
   if (lang && translations[lang] && translations[lang][grantId]) {

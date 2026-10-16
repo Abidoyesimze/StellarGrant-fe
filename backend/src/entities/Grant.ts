@@ -34,6 +34,10 @@ export class Grant {
   @Column({ type: "varchar", length: 60 })
   totalAmount!: string;
 
+  /** Funding token sentinel ("native") or asset/SAC identifier (e.g. "USDC"). */
+  @Column({ type: "varchar", length: 120, nullable: true, default: "native" })
+  token?: string | null;
+
   @Column({ type: "text", nullable: true })
   tags?: string;
 

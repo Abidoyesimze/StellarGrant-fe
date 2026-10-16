@@ -154,7 +154,7 @@ export function mapApiGrantDetail(data: ApiGrantDetail, funded = 0n): GrantDetai
 }
 
 export async function fetchGrantById(id: string): Promise<GrantDetailPayload | null> {
-  const res = await fetch(`${API_URL}/grants/${id}`, {
+  const res = await fetch(`${API_URL}/grants/${encodeURIComponent(id)}`, {
     next: { revalidate: 60 },
   });
   if (!res.ok) return null;
@@ -176,9 +176,12 @@ export async function fetchGrantById(id: string): Promise<GrantDetailPayload | n
 }
 
 export async function fetchGrantReviewers(grantId: string): Promise<string[]> {
-  const res = await fetch(`${API_URL}/grant_reviewers/grant/${grantId}`, {
-    next: { revalidate: 60 },
-  });
+  const res = await fetch(
+    `${API_URL}/grant_reviewers/grant/${encodeURIComponent(grantId)}`,
+    {
+      next: { revalidate: 60 },
+    }
+  );
   if (!res.ok) return [];
   const json = (await res.json()) as {
     data?: Array<{ reviewerStellarAddress: string }>;
@@ -187,9 +190,12 @@ export async function fetchGrantReviewers(grantId: string): Promise<string[]> {
 }
 
 export async function fetchGrantFunders(grantId: string): Promise<FunderRow[]> {
-  const res = await fetch(`${API_URL}/grants/${grantId}/funders`, {
-    next: { revalidate: 30 },
-  });
+  const res = await fetch(
+    `${API_URL}/grants/${encodeURIComponent(grantId)}/funders`,
+    {
+      next: { revalidate: 30 },
+    }
+  );
   if (!res.ok) return [];
   const json = (await res.json()) as {
     data?: Array<{ address: string; amount: string }>;

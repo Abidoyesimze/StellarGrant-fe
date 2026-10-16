@@ -14,6 +14,7 @@ import {
   Operation,
   TransactionBuilder,
   xdr,
+  type rpc,
 } from "@stellar/stellar-sdk";
 
 vi.mock("../lib/stellar/client", () => ({
@@ -65,7 +66,7 @@ describe("buildUnsignedTransaction", () => {
 
     vi.mocked(getRpcClient).mockReturnValue({
       getAccount: vi.fn().mockResolvedValue(account),
-    } as any);
+    } as unknown as rpc.Server);
 
     const originalTx = new TransactionBuilder(account, {
       fee: BASE_FEE.toString(),

@@ -118,6 +118,7 @@ export class GrantSyncService {
     return {
       ...grantData,
       owner: grant.owner ?? grant.recipient,
+      token: grant.token ?? "native",
     };
   }
 }
